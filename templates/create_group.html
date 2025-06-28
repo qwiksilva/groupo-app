@@ -1,0 +1,16 @@
+<!-- templates/create_group.html -->
+<!doctype html>
+<html>
+<head>
+    <title>Create Group</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="container">
+    <h1>Create Group</h1>
+    <form method="POST">
+        <input name="name" placeholder="Group Name" required>
+        <button type="submit">Create</button>
+    </form>
+    <a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+</body>
+</html>

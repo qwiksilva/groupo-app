@@ -1,0 +1,13 @@
+<!-- templates/home.html -->
+<!doctype html>
+<html>
+<head>
+    <title>Welcome to GroupGram</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="container">
+    <h1>Welcome to GroupGram</h1>
+    <a href="{{ url_for('login_page') }}">Login</a> |
+    <a href="{{ url_for('register') }}">Register</a>
+</body>
+</html>
