@@ -2,12 +2,11 @@ from flask import Flask, request, jsonify, session, redirect, url_for, render_te
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from werkzeug.utils import secure_filename
 import os
 
 
 from extensions.uploads import save_files, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
-from extensions.s3_upload import upload_file_to_s3
+# from extensions.s3_upload import upload_file_to_s3
 
 
 
