@@ -1,18 +1,41 @@
 from app import db, app, User, Group, Post, Comment, GroupMembers
+from flask_bcrypt import Bcrypt
 import os
+
+bcrypt = Bcrypt(app)
 
 with app.app_context():
     db.drop_all()
     db.create_all()
 
-    # Optional: seed with one user and group for testing
-    user = User(username='testuser', password='test', first_name='Test', last_name='User')
-    db.session.add(user)
-    db.session.commit()
+    passw = os.environ['GROUPO_PASSWORD']
 
-    group = Group(name='Test Group')
-    group.members.append(user)
-    db.session.add(group)
+    pw = bcrypt.generate_password_hash(passw).decode('utf-8')
+
+    username = os.environ['GROUPO_USER1']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
+
+    username = os.environ['GROUPO_USER2']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
+
+    # username = os.environ['GROUPO_USER3']
+    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    # db.session.add(user)
+    #
+    # username = os.environ['GROUPO_USER4']
+    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    # db.session.add(user)
+    #
+    # username = os.environ['GROUPO_USER5']
+    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    # db.session.add(user)
+    #
+    # username = os.environ['GROUPO_USER6']
+    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    # db.session.add(user)
+
     db.session.commit()
 
     print("Database schema reset and test data added.")

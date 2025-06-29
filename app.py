@@ -85,19 +85,20 @@ def home():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    if request.method == 'POST':
-        data = request.form
-        hashed_pw = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-        user = User(
-            username=data['username'],
-            password=hashed_pw,
-            first_name=data['first_name'],
-            last_name=data['last_name']
-        )
-        db.session.add(user)
-        db.session.commit()
-        return redirect(url_for('login_page'))
-    return render_template('register.html')
+    return render_template('home.html')
+    # if request.method == 'POST':
+    #     data = request.form
+    #     hashed_pw = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+    #     user = User(
+    #         username=data['username'],
+    #         password=hashed_pw,
+    #         first_name=data['first_name'],
+    #         last_name=data['last_name']
+    #     )
+    #     db.session.add(user)
+    #     db.session.commit()
+    #     return redirect(url_for('login_page'))
+    # return render_template('register.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -163,7 +164,7 @@ def group_posts(group_id):
         db.session.commit()
         return redirect(url_for('group_posts', group_id=group_id))
 
-    posts = Post.query.filter_by(group_id=group.id).all()
+    posts = Post.query.filter_by(group_id=group.id).order_by(Post.id.desc()).all()
     return render_template('group_posts.html', group=group, posts=posts)
 
 @app.route('/uploads/<filename>')
