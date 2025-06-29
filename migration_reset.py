@@ -20,21 +20,21 @@ with app.app_context():
     user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
     db.session.add(user)
 
-    # username = os.environ['GROUPO_USER3']
-    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
-    # db.session.add(user)
-    #
-    # username = os.environ['GROUPO_USER4']
-    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
-    # db.session.add(user)
-    #
-    # username = os.environ['GROUPO_USER5']
-    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
-    # db.session.add(user)
-    #
-    # username = os.environ['GROUPO_USER6']
-    # user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
-    # db.session.add(user)
+    username = os.environ['GROUPO_USER3']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
+
+    username = os.environ['GROUPO_USER4']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
+
+    username = os.environ['GROUPO_USER5']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
+
+    username = os.environ['GROUPO_USER6']
+    user = User(username=username.split()[0], password=pw, first_name=username.split()[0], last_name=username.split()[1])
+    db.session.add(user)
 
     db.session.commit()
 
