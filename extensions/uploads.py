@@ -3,13 +3,17 @@ import os
 from werkzeug.utils import secure_filename
 from flask import current_app, url_for
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'webm', 'ogg'}
+VIDEO_EXTENSIONS = {'mp4', 'webm', 'ogg'}
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    ext = filename.rsplit('.', 1)[1].lower()
+    return '.' in filename and ext in ALLOWED_EXTENSIONS
 
+def is_video(filename):
+    return filename.rsplit('.', 1)[1].lower() in VIDEO_EXTENSIONS
 
 def save_files(files, upload_dir):
     urls = []

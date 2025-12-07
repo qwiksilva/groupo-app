@@ -106,7 +106,7 @@
     <h1>{{ group.name }}</h1>
     <form id="postForm" method="POST" enctype="multipart/form-data" onsubmit="submitPost(event)">
         <textarea name="content" placeholder="Write a post..." required></textarea><br>
-        <input type="file" name="file" accept="image/*" multiple><br>
+        <input type="file" name="file" accept="image/*,video/*" multiple><br>
         <button type="submit">Post</button>
     </form>
 
@@ -124,8 +124,16 @@
 
             {% if post.image_urls %}
             <div class="image-preview">
-                {% for image_url in post.image_urls.split(',') %}
-                    <img src="{{ image_url }}" onclick="previewImage('{{ image_url }}')">
+                {% for url in post.image_urls.split(',') %}
+                    {% set ext = url.split('.')[-1] %}
+                    {% if ext in ['mp4', 'webm', 'ogg'] %}
+                        <video controls style="max-width: 300px; margin-top: 10px;">
+                            <source src="{{ url }}" type="video/{{ ext }}">
+                            Your browser does not support the video tag.
+                        </video>
+                    {% else %}
+                        <img src="{{ url }}" style="max-width: 300px; margin-top: 10px;">
+                    {% endif %}
                 {% endfor %}
             </div>
             {% endif %}
