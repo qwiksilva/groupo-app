@@ -1,36 +1,42 @@
 import boto3
 import os
+from uuid import uuid4
 from werkzeug.utils import secure_filename
-from flask import current_app
-from dotenv import load_dotenv
-
 from extensions.uploads import allowed_file
 
-load_dotenv()
+def _get_s3():
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    bucket = os.environ.get("S3_BUCKET_NAME")
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    if not all([access_key, secret_key, bucket]):
+        return None, None
+    client = boto3.client(
+        "s3",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+    )
+    return client, bucket
 
-print('AWS_ACCESS_KEY_ID' in os.environ)
-
-s3 = boto3.client(
-    's3',
-    aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-    aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-    region_name=os.environ.get('AWS_REGION', 'us-east-1')
-)
-
-BUCKET_NAME = os.environ['S3_BUCKET_NAME']
 
 def upload_file_to_s3(files):
+    client, bucket = _get_s3()
+    if not client or not bucket:
+        raise RuntimeError("S3 not configured (missing AWS keys or bucket name).")
+
     urls = []
     for file in files:
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            s3.upload_fileobj(
+            # Make filename unique to avoid collisions.
+            filename = f"{uuid4().hex}_{secure_filename(file.filename)}"
+            client.upload_fileobj(
                 file,
-                BUCKET_NAME,
+                bucket,
                 filename,
                 ExtraArgs={
                     'ContentType': file.content_type
                 }
             )
-            urls.append(f"https://{BUCKET_NAME}.s3.amazonaws.com/{filename}")
+            urls.append(f"https://{bucket}.s3.amazonaws.com/{filename}")
     return urls

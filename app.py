@@ -76,7 +76,10 @@ friends = db.Table('friends',
 def store_files(files):
     """Save uploads locally or to S3 depending on environment."""
     if USE_S3:
-        return upload_file_to_s3(files)
+        try:
+            return upload_file_to_s3(files)
+        except Exception as exc:
+            print(f"[upload] S3 upload failed, falling back to local: {exc}")
     return save_files(files, app.config['UPLOAD_FOLDER'])
 
 class DeviceToken(db.Model):
