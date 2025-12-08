@@ -19,6 +19,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///groupo.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 USE_S3 = os.environ.get('RENDER') == 'true'
+if USE_S3:
+    print("[startup] RENDER=true detected; will attempt S3 uploads. Ensure AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/S3_BUCKET_NAME are set.")
 
 bcrypt = Bcrypt(app)
 db = SQLAlchemy(app)
@@ -77,7 +79,9 @@ def store_files(files):
     """Save uploads locally or to S3 depending on environment."""
     if USE_S3:
         try:
-            return upload_file_to_s3(files)
+            urls = upload_file_to_s3(files)
+            print(f"[upload] S3 stored files: {urls}")
+            return urls
         except Exception as exc:
             print(f"[upload] S3 upload failed, falling back to local: {exc}")
     return save_files(files, app.config['UPLOAD_FOLDER'])

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { SafeAreaView, View, Text, FlatList, TextInput, Button, StyleSheet, Image, ScrollView, Dimensions } from 'react-native';
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import {
   api,
@@ -33,6 +33,12 @@ const GroupDetail = () => {
       headerShown: false,
     });
   }, [groupId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [groupId])
+  );
 
   const load = async () => {
     if (!api.defaults.headers.common.Authorization) {

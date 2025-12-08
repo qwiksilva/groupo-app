@@ -3,7 +3,8 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
 // Point to your backend; on device use your machine's LAN IP.
-export const API_URL = 'https://groupo-app.onrender.com'; //'http://192.168.1.161:5000'; //'http://localhost:5000';
+// export const API_URL = 'https://groupo-app.onrender.com'; //'http://localhost:5000';
+export const API_URL = 'http://192.168.1.161:5000';
 
 export const resolveUrl = (u: string) => (u.startsWith('http') ? u : `${API_URL}${u}`);
 

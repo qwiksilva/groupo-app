@@ -5,12 +5,15 @@ from flask import current_app, url_for
 
 MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'webm', 'ogg'}
+# Allow common images, iOS HEIC/HEIF, and a few video formats.
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'webm', 'ogg', 'heic', 'heif'}
 VIDEO_EXTENSIONS = {'mp4', 'webm', 'ogg'}
 
 def allowed_file(filename):
+    if '.' not in filename:
+        return False
     ext = filename.rsplit('.', 1)[1].lower()
-    return '.' in filename and ext in ALLOWED_EXTENSIONS
+    return ext in ALLOWED_EXTENSIONS
 
 def is_video(filename):
     return filename.rsplit('.', 1)[1].lower() in VIDEO_EXTENSIONS

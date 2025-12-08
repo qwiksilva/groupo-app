@@ -46,7 +46,8 @@ A small Flask social app for creating groups, posting text with optional images/
 
 ## File storage
 - Local dev: uploads are stored under `static/uploads` (served from `/uploads/<filename>`).
-- Render/production: if the `RENDER` env var is set to `true`, uploads are sent to S3 via `extensions/s3_upload.py`. Set these env vars: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, and optional `AWS_REGION` (default `us-east-1`).
+- Render/production: if the `RENDER` env var is set to `true`, uploads are sent to S3 via `extensions/s3_upload.py`. Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, optional `AWS_REGION` (default `us-east-1`), and optional `S3_URL_EXPIRES` (seconds, default 86400). Objects are stored private and the app uses presigned URLs, so the bucket can stay non-public. Startup logs will show `[startup] RENDER=true...`; successful uploads log `[upload] S3 stored files: [...]`, failures log and fall back to local.
+- To debug S3 locally: set `RENDER=true` and the AWS vars in your shell, run the app, and post a file. Watch console for `[upload]` logs; you should see the S3 URL or a fallback message.
 
 ## Production-Style Run (Docker)
 - The Dockerfile runs `gunicorn app:app --bind 0.0.0.0:8000` inside the container.

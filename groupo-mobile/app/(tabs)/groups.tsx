@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { SafeAreaView, Text, FlatList, TouchableOpacity, StyleSheet, Button, TextInput, Modal, View } from 'react-native';
-import { useRouter, useNavigation } from 'expo-router';
+import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { api, fetchGroups, createGroup } from '../lib/api';
 
 const GroupsScreen = () => {
@@ -27,6 +27,21 @@ const GroupsScreen = () => {
     };
     load();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const refresh = async () => {
+        if (!api.defaults.headers.common.Authorization) return;
+        try {
+          const data = await fetchGroups();
+          setGroups(data);
+        } catch (err: any) {
+          setStatus(err.response?.data?.error || err.message);
+        }
+      };
+      refresh();
+    }, [])
+  );
 
   useLayoutEffect(() => {
     navigation.setOptions({

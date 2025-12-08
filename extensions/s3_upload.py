@@ -1,6 +1,7 @@
 import boto3
 import os
 from uuid import uuid4
+from botocore.config import Config
 from werkzeug.utils import secure_filename
 from extensions.uploads import allowed_file
 
@@ -16,6 +17,8 @@ def _get_s3():
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         region_name=region,
+        endpoint_url=f"https://s3.{region}.amazonaws.com",
+        config=Config(signature_version="s3v4"),
     )
     return client, bucket
 
@@ -24,8 +27,11 @@ def upload_file_to_s3(files):
     client, bucket = _get_s3()
     if not client or not bucket:
         raise RuntimeError("S3 not configured (missing AWS keys or bucket name).")
+    region = os.environ.get("AWS_REGION", "us-east-1")
 
     urls = []
+    expires = int(os.environ.get("S3_URL_EXPIRES", 60 * 60 * 24))  # default 24h
+
     for file in files:
         if file and allowed_file(file.filename):
             # Make filename unique to avoid collisions.
@@ -35,8 +41,20 @@ def upload_file_to_s3(files):
                 bucket,
                 filename,
                 ExtraArgs={
-                    'ContentType': file.content_type
+                    'ContentType': file.content_type or 'application/octet-stream',
                 }
             )
-            urls.append(f"https://{bucket}.s3.amazonaws.com/{filename}")
+            presigned = client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": filename},
+                ExpiresIn=expires,
+            )
+            print(f"[upload] presigned for bucket={bucket} region={region} key={filename}")
+            print(f"[upload] url={presigned}")
+            urls.append(presigned)
+        else:
+            if not file:
+                print("[upload] skipped empty file object")
+            elif not allowed_file(file.filename):
+                print(f"[upload] skipped disallowed extension: {file.filename}")
     return urls
