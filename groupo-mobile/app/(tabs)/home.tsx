@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Image, ScrollView, Dimensions } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect } from 'expo-router';
 import {
   login,
@@ -13,9 +16,60 @@ import {
   commentOnPost,
   createPost,
   createPostWithFiles,
+  setToken,
 } from '../lib/api';
 
 const IMAGE_WIDTH = Dimensions.get('window').width - 32; // container padding margin
+const POST_IMAGE_HEIGHT = Math.round(IMAGE_WIDTH * 1.5); // tall enough for portrait photos
+const TOKEN_KEY = 'groupo_auth_token';
+const USER_KEY = 'groupo_user';
+
+const extensionFromMime = (mime?: string) => {
+  if (!mime) return null;
+  if (mime === 'image/jpeg') return 'jpg';
+  if (mime === 'image/heic') return 'heic';
+  if (mime === 'image/heif') return 'heif';
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/gif') return 'gif';
+  if (mime === 'video/mp4') return 'mp4';
+  if (mime === 'video/webm') return 'webm';
+  if (mime === 'video/ogg') return 'ogg';
+  return null;
+};
+
+const buildUploadName = (asset: ImagePicker.ImagePickerAsset) => {
+  if (asset.fileName && asset.fileName.includes('.')) {
+    return asset.fileName;
+  }
+  const uriExt = asset.uri.split('?')[0].split('.').pop();
+  if (uriExt && uriExt !== asset.uri) {
+    return `upload.${uriExt}`;
+  }
+  const mimeExt = extensionFromMime(asset.mimeType);
+  return `upload.${mimeExt || (asset.type === 'video' ? 'mp4' : 'jpg')}`;
+};
+
+const resolveAssetUri = async (asset: ImagePicker.ImagePickerAsset) => {
+  if (!asset.uri.startsWith('ph://') && !asset.uri.startsWith('assets-library://')) {
+    return asset.uri;
+  }
+  if (!asset.assetId) {
+    return asset.uri;
+  }
+  try {
+    const info = await MediaLibrary.getAssetInfoAsync(asset.assetId);
+    return info.localUri || info.uri || asset.uri;
+  } catch {
+    return asset.uri;
+  }
+};
+
+const PostImage = ({ uri }: { uri: string }) => (
+  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
+    <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
+  </View>
+);
+
 const HomeScreen = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [user, setUser] = useState<any>(null);
@@ -29,6 +83,25 @@ const HomeScreen = () => {
   const [content, setContent] = useState('');
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
   const [media, setMedia] = useState<any[]>([]);
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+        const storedUser = await SecureStore.getItemAsync(USER_KEY);
+        if (storedToken) {
+          setToken(storedToken);
+          setTokenState(storedToken);
+        }
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+        }
+      } catch {
+        // ignore restore errors and continue unauthenticated
+      }
+    };
+    restoreSession();
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -79,6 +152,9 @@ const HomeScreen = () => {
         const { token: t, user: u } = await login(username, password);
         setUser(u);
         setTokenState(t);
+        setToken(t);
+        await SecureStore.setItemAsync(TOKEN_KEY, t);
+        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(u));
       } else {
         const { token: t, user: u } = await register({
           username,
@@ -88,6 +164,9 @@ const HomeScreen = () => {
         });
         setUser(u);
         setTokenState(t);
+        setToken(t);
+        await SecureStore.setItemAsync(TOKEN_KEY, t);
+        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(u));
       }
       setStatus('Authenticated');
     } catch (err: any) {
@@ -159,11 +238,32 @@ const HomeScreen = () => {
       quality: 0.8,
       allowsMultipleSelection: true,
       selectionLimit: 5,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
     if (!result.canceled && result.assets?.length) {
-      const files = result.assets.map((asset) => ({
-        uri: asset.uri,
-        name: asset.fileName || 'upload',
+      const normalizedAssets = await Promise.all(
+        result.assets.map(async (asset) => ({
+          asset,
+          uri: await resolveAssetUri(asset),
+        }))
+      );
+      const unresolved = normalizedAssets.find(({ uri }) => uri.startsWith('ph://') || uri.startsWith('assets-library://'));
+      if (unresolved) {
+        setStatus('Selected media could not be accessed. Try picking a different item or allow full photo access.');
+        return;
+      }
+      const fileInfos = await Promise.all(
+        normalizedAssets.map(async ({ uri }) => ({ uri, info: await FileSystem.getInfoAsync(uri) }))
+      );
+      console.log('[upload] picked file info', fileInfos);
+      const missingFile = fileInfos.find(({ info }) => !info.exists);
+      if (missingFile) {
+        setStatus('Selected media is not available on this device. Try another photo or download it first.');
+        return;
+      }
+      const files = normalizedAssets.map(({ asset, uri }) => ({
+        uri,
+        name: buildUploadName(asset),
         mimeType: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
       }));
       setMedia(files);
@@ -219,7 +319,7 @@ const HomeScreen = () => {
             {item.image_urls?.length ? (
               <ScrollView horizontal pagingEnabled style={styles.carousel}>
                 {item.image_urls.map((u: string, idx: number) => (
-                  <Image key={idx} source={{ uri: resolveUrl(u) }} style={styles.postImage} resizeMode="cover" />
+                  <PostImage key={idx} uri={resolveUrl(u)} />
                 ))}
               </ScrollView>
             ) : null}
@@ -258,7 +358,20 @@ const styles = StyleSheet.create({
   activeToggle: { color: '#000', fontWeight: '700' },
   postCard: { padding: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginVertical: 6, backgroundColor: '#fafafa' },
   postMeta: { fontWeight: '600', marginBottom: 4 },
-  postImage: { width: IMAGE_WIDTH, height: 220, marginTop: 8, borderRadius: 8, backgroundColor: '#ddd', marginRight: 8 },
+  postImageContainer: {
+    width: IMAGE_WIDTH,
+    marginTop: 8,
+    marginRight: 8,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  postImage: {
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
   carousel: { marginTop: 8 },
   status: { marginTop: 8, color: '#c00' },
   postInput: { marginBottom: 12 },

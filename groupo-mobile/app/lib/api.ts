@@ -1,10 +1,12 @@
 import axios from 'axios';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Point to your backend; on device use your machine's LAN IP.
-// export const API_URL = 'https://groupo-app.onrender.com'; //'http://localhost:5000';
-export const API_URL = 'http://192.168.1.161:5000';
+export const API_URL = 'https://groupo-app.onrender.com';
+// export const API_URL = 'http://192.168.1.161:5000';
+// export const API_URL = 'http://localhost:5000';
 
 export const resolveUrl = (u: string) => (u.startsWith('http') ? u : `${API_URL}${u}`);
 
@@ -46,19 +48,45 @@ export const createPostWithFiles = async (
   content: string,
   files: { uri: string; name?: string; mimeType?: string }[]
 ) => {
-  const form = new FormData();
-  form.append('content', content);
-  files.forEach((file) => {
-    form.append('file', {
-      uri: file.uri,
-      name: file.name || 'upload',
-      type: file.mimeType || 'application/octet-stream',
-    } as any);
-  });
-  const { data } = await api.post(`/api/groups/${groupId}/posts`, form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return data;
+  const headers: Record<string, string> = {};
+  const auth = api.defaults.headers.common.Authorization;
+  if (typeof auth === 'string' && auth.length) {
+    headers.Authorization = auth;
+  }
+  const uploadSingle = async (url: string, file: { uri: string }, params?: Record<string, string>) => {
+    const result = await FileSystem.uploadAsync(url, file.uri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      parameters: params,
+      headers,
+    });
+    if (result.status < 200 || result.status >= 300) {
+      console.error('[upload] uploadAsync error', { status: result.status, body: result.body });
+      throw new Error(`Upload failed (${result.status})`);
+    }
+    try {
+      return JSON.parse(result.body);
+    } catch {
+      return result.body as any;
+    }
+  };
+
+  if (files.length === 1) {
+    const file = files[0];
+    return await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, file, { content });
+  }
+
+  const [first, ...rest] = files;
+  const firstResp = await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, first, { content });
+  const postId = firstResp?.post_id;
+  if (!postId) {
+    throw new Error('Upload failed (missing post id)');
+  }
+  for (const file of rest) {
+    await uploadSingle(`${API_URL}/api/posts/${postId}/media`, file);
+  }
+  return firstResp;
 };
 
 export const createGroup = async (name: string) => {

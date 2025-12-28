@@ -455,6 +455,22 @@ def api_comment_post(post_id):
     db.session.commit()
     return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username}})
 
+
+@app.route('/api/posts/<int:post_id>/media', methods=['POST'])
+@token_required
+def api_add_post_media(post_id):
+    post = Post.query.get_or_404(post_id)
+    if post.user_id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+    files = request.files.getlist('file')
+    if not files:
+        return jsonify({"error": "Files required"}), 400
+    image_urls = store_files(files)
+    existing = post.image_urls.split(',') if post.image_urls else []
+    post.image_urls = ','.join(existing + image_urls)
+    db.session.commit()
+    return jsonify({"message": "Attached", "image_urls": post.image_urls.split(',')})
+
 if __name__ == '__main__':
     if not os.path.exists('groupo.db'):
         with app.app_context():
