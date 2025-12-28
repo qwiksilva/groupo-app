@@ -12,8 +12,12 @@ export const resolveUrl = (u: string) => (u.startsWith('http') ? u : `${API_URL}
 
 export const api = axios.create({ baseURL: API_URL });
 
-export const setToken = (token: string) => {
-  api.defaults.headers.common.Authorization = `Bearer ${token}`;
+export const setToken = (token: string | null) => {
+  if (token) {
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common.Authorization;
+  }
 };
 
 export const login = async (username: string, password: string) => {
@@ -48,43 +52,101 @@ export const createPostWithFiles = async (
   content: string,
   files: { uri: string; name?: string; mimeType?: string }[]
 ) => {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    Connection: 'close',
+    Expect: '',
+  };
   const auth = api.defaults.headers.common.Authorization;
   if (typeof auth === 'string' && auth.length) {
     headers.Authorization = auth;
   }
-  const uploadSingle = async (url: string, file: { uri: string }, params?: Record<string, string>) => {
-    const result = await FileSystem.uploadAsync(url, file.uri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName: 'file',
-      parameters: params,
-      headers,
-    });
-    if (result.status < 200 || result.status >= 300) {
-      console.error('[upload] uploadAsync error', { status: result.status, body: result.body });
-      throw new Error(`Upload failed (${result.status})`);
-    }
+  const uploadSingle = async (
+    url: string,
+    file: { uri: string; mimeType?: string },
+    params?: Record<string, string>
+  ) => {
     try {
-      return JSON.parse(result.body);
-    } catch {
-      return result.body as any;
+      const result = await FileSystem.uploadAsync(url, file.uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: file.mimeType,
+        parameters: params,
+        headers,
+        sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+      });
+      if (result.status < 200 || result.status >= 300) {
+        console.error('[upload] uploadAsync error', { status: result.status, body: result.body });
+        throw new Error(`Upload failed (${result.status})`);
+      }
+      try {
+        return JSON.parse(result.body);
+      } catch {
+        return result.body as any;
+      }
+    } catch (err: any) {
+      console.error('[upload] uploadAsync exception', {
+        message: err?.message,
+        code: err?.code,
+        url,
+      });
+      throw err;
     }
+  };
+
+  const readAsBase64 = async (file: { uri: string; name?: string; mimeType?: string }) => {
+    const data = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+    return {
+      name: file.name || 'upload',
+      mimeType: file.mimeType || 'application/octet-stream',
+      data,
+    };
+  };
+
+  const uploadBase64Create = async (payloadFiles: { name: string; mimeType: string; data: string }[]) => {
+    const { data } = await api.post(`/api/groups/${groupId}/posts/base64`, {
+      content,
+      files: payloadFiles,
+    });
+    return data;
+  };
+
+  const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) => {
+    const { data } = await api.post(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
+    return data;
   };
 
   if (files.length === 1) {
     const file = files[0];
-    return await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, file, { content });
+    try {
+      return await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, file, { content });
+    } catch {
+      const payload = [await readAsBase64(file)];
+      return await uploadBase64Create(payload);
+    }
   }
 
   const [first, ...rest] = files;
-  const firstResp = await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, first, { content });
+  let firstResp: any;
+  try {
+    firstResp = await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, first, { content });
+  } catch {
+    const payload = await Promise.all(files.map(readAsBase64));
+    return await uploadBase64Create(payload);
+  }
+
   const postId = firstResp?.post_id;
   if (!postId) {
     throw new Error('Upload failed (missing post id)');
   }
   for (const file of rest) {
-    await uploadSingle(`${API_URL}/api/posts/${postId}/media`, file);
+    try {
+      await uploadSingle(`${API_URL}/api/posts/${postId}/media`, file);
+    } catch {
+      const payload = [await readAsBase64(file)];
+      await uploadBase64Media(postId, payload);
+    }
   }
   return firstResp;
 };

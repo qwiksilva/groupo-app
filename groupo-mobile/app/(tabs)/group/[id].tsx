@@ -4,6 +4,7 @@ import { useLocalSearchParams, useNavigation, useRouter, useFocusEffect } from '
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
+import * as SecureStore from 'expo-secure-store';
 import {
   api,
   fetchGroupPosts,
@@ -12,6 +13,7 @@ import {
   resolveUrl,
   likePost,
   commentOnPost,
+  setToken,
 } from '../../lib/api';
 
 const IMAGE_WIDTH = Dimensions.get('window').width - 32;
@@ -75,6 +77,15 @@ const GroupDetail = () => {
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
   const navigation = useNavigation();
   const router = useRouter();
+  const handleLogout = useCallback(
+    async (message = 'Session expired. Please log in again.') => {
+      await SecureStore.deleteItemAsync('groupo_auth_token');
+      await SecureStore.deleteItemAsync('groupo_user');
+      setToken(null);
+      setStatus(message);
+    },
+    []
+  );
 
   useEffect(() => {
     load();
@@ -99,6 +110,10 @@ const GroupDetail = () => {
       setPosts(data.posts || []);
       setStatus('');
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -115,6 +130,10 @@ const GroupDetail = () => {
       setMedia([]);
       load();
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -167,6 +186,10 @@ const GroupDetail = () => {
       const res = await likePost(postId);
       setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, likes: res.likes } : p)));
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -185,6 +208,10 @@ const GroupDetail = () => {
       );
       setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };

@@ -84,6 +84,18 @@ const HomeScreen = () => {
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
   const [media, setMedia] = useState<any[]>([]);
 
+  const handleLogout = useCallback(
+    async (message = 'Logged out.') => {
+      await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await SecureStore.deleteItemAsync(USER_KEY);
+      setToken(null);
+      setTokenState(null);
+      setUser(null);
+      setStatus(message);
+    },
+    []
+  );
+
   useEffect(() => {
     const restoreSession = async () => {
       try {
@@ -106,9 +118,15 @@ const HomeScreen = () => {
   useEffect(() => {
     if (token) {
       loadFeed();
-      registerPushToken().catch((err) => setStatus(`Push error: ${err.message}`));
+      registerPushToken().catch(async (err) => {
+        if (err.response?.status === 401) {
+          await handleLogout('Session expired. Please log in again.');
+          return;
+        }
+        setStatus(`Push error: ${err.message}`);
+      });
     }
-  }, [token]);
+  }, [token, handleLogout]);
 
   useFocusEffect(
     useCallback(() => {
@@ -141,6 +159,10 @@ const HomeScreen = () => {
       setFeed(combined);
       setStatus('');
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -170,6 +192,10 @@ const HomeScreen = () => {
       }
       setStatus('Authenticated');
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -205,6 +231,10 @@ const HomeScreen = () => {
       const res = await likePost(postId);
       setFeed((prev) => prev.map((p) => (p.id === postId ? { ...p, likes: res.likes } : p)));
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -223,6 +253,10 @@ const HomeScreen = () => {
       );
       setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
@@ -289,13 +323,20 @@ const HomeScreen = () => {
       setMedia([]);
       loadFeed();
     } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
       setStatus(err.response?.data?.error || err.message);
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Latest posts</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Latest posts</Text>
+        <Button title="Log out" onPress={() => handleLogout('Logged out.')} />
+      </View>
       {/* <View style={styles.postInput}>
         <TextInput
           placeholder="Write something..."
@@ -349,8 +390,9 @@ const HomeScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+  const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 24, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   toggleRow: { flexDirection: 'row', gap: 12, marginBottom: 8 },

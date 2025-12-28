@@ -6,10 +6,13 @@ from functools import wraps
 import os
 import secrets
 import requests
+import base64
+from uuid import uuid4
+from werkzeug.utils import secure_filename
 
 
 from extensions.uploads import save_files, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
-from extensions.s3_upload import upload_file_to_s3
+from extensions.s3_upload import upload_file_to_s3, upload_bytes_to_s3
 
 
 
@@ -85,6 +88,72 @@ def store_files(files):
         except Exception as exc:
             print(f"[upload] S3 upload failed, falling back to local: {exc}")
     return save_files(files, app.config['UPLOAD_FOLDER'])
+
+
+MIME_EXTENSION_MAP = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/ogg': 'ogg',
+}
+
+
+def _normalize_filename(name, mime_type):
+    filename = secure_filename(name) if name else ''
+    ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else None
+    if not ext:
+        ext = MIME_EXTENSION_MAP.get(mime_type or '')
+        if ext:
+            filename = f"upload.{ext}"
+    if not ext:
+        ext = 'jpg'
+        filename = f"upload.{ext}"
+    if ext not in ALLOWED_EXTENSIONS:
+        return None
+    return filename
+
+
+def store_base64_files(files):
+    items = []
+    for payload in files:
+        data = payload.get('data') or payload.get('base64')
+        if not data:
+            continue
+        if isinstance(data, str) and data.startswith('data:') and ',' in data:
+            data = data.split(',', 1)[1]
+        try:
+            raw = base64.b64decode(data)
+        except Exception:
+            continue
+        mime_type = payload.get('mimeType') or payload.get('mime_type')
+        filename = _normalize_filename(payload.get('name'), mime_type)
+        if not filename:
+            continue
+        unique = f"{uuid4().hex}_{filename}"
+        items.append({
+            "filename": unique,
+            "content_type": mime_type or 'application/octet-stream',
+            "data": raw,
+        })
+    if not items:
+        return []
+    if USE_S3:
+        try:
+            return upload_bytes_to_s3(items)
+        except Exception as exc:
+            print(f"[upload] S3 base64 upload failed, falling back to local: {exc}")
+
+    urls = []
+    for item in items:
+        path = os.path.join(app.config['UPLOAD_FOLDER'], item["filename"])
+        with open(path, 'wb') as f:
+            f.write(item["data"])
+        urls.append(url_for('uploaded_file', filename=item["filename"]))
+    return urls
 
 class DeviceToken(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -401,6 +470,29 @@ def api_group_posts(group_id):
     })
 
 
+@app.route('/api/groups/<int:group_id>/posts/base64', methods=['POST'])
+@token_required
+def api_group_posts_base64(group_id):
+    group = Group.query.get_or_404(group_id)
+    if g.api_user not in group.members:
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json() or {}
+    content = data.get('content')
+    files = data.get('files') or []
+    if not content:
+        return jsonify({"error": "Content required"}), 400
+    if not files:
+        return jsonify({"error": "Files required"}), 400
+    image_urls = store_base64_files(files)
+    if not image_urls:
+        return jsonify({"error": "No valid files"}), 400
+    post = Post(content=content, user_id=g.api_user.id, group_id=group.id, image_urls=','.join(image_urls))
+    db.session.add(post)
+    db.session.commit()
+    notify_group_members(group, g.api_user, post)
+    return jsonify({"message": "Created", "post_id": post.id})
+
+
 @app.route('/api/groups/<int:group_id>/update', methods=['POST'])
 @token_required
 def api_update_group(group_id):
@@ -466,6 +558,25 @@ def api_add_post_media(post_id):
     if not files:
         return jsonify({"error": "Files required"}), 400
     image_urls = store_files(files)
+    existing = post.image_urls.split(',') if post.image_urls else []
+    post.image_urls = ','.join(existing + image_urls)
+    db.session.commit()
+    return jsonify({"message": "Attached", "image_urls": post.image_urls.split(',')})
+
+
+@app.route('/api/posts/<int:post_id>/media/base64', methods=['POST'])
+@token_required
+def api_add_post_media_base64(post_id):
+    post = Post.query.get_or_404(post_id)
+    if post.user_id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json() or {}
+    files = data.get('files') or []
+    if not files:
+        return jsonify({"error": "Files required"}), 400
+    image_urls = store_base64_files(files)
+    if not image_urls:
+        return jsonify({"error": "No valid files"}), 400
     existing = post.image_urls.split(',') if post.image_urls else []
     post.image_urls = ','.join(existing + image_urls)
     db.session.commit()
