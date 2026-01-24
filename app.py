@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 
 
 from extensions.uploads import save_files, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
-from extensions.s3_upload import upload_file_to_s3, upload_bytes_to_s3
+from extensions.s3_upload import upload_file_to_s3, upload_bytes_to_s3, presign_keys
 
 
 
@@ -53,7 +53,7 @@ class Group(db.Model):
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    image_urls = db.Column(db.Text)  # Comma-separated URLs
+    image_urls = db.Column(db.Text)  # Comma-separated URLs or S3 keys
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
     likes = db.Column(db.Integer, default=0)
@@ -82,9 +82,9 @@ def store_files(files):
     """Save uploads locally or to S3 depending on environment."""
     if USE_S3:
         try:
-            urls = upload_file_to_s3(files)
-            print(f"[upload] S3 stored files: {urls}")
-            return urls
+            keys = upload_file_to_s3(files)
+            print(f"[upload] S3 stored files: {keys}")
+            return keys
         except Exception as exc:
             print(f"[upload] S3 upload failed, falling back to local: {exc}")
     return save_files(files, app.config['UPLOAD_FOLDER'])
@@ -153,6 +153,23 @@ def store_base64_files(files):
         with open(path, 'wb') as f:
             f.write(item["data"])
         urls.append(url_for('uploaded_file', filename=item["filename"]))
+    return urls
+
+
+def _split_image_urls(image_urls):
+    return image_urls.split(',') if image_urls else []
+
+
+def _resolve_image_urls(image_urls):
+    urls = _split_image_urls(image_urls)
+    if not urls:
+        return []
+    if USE_S3:
+        try:
+            return presign_keys(urls)
+        except Exception as exc:
+            print(f"[upload] presign failed, returning raw keys: {exc}")
+            return urls
     return urls
 
 class DeviceToken(db.Model):
@@ -262,7 +279,8 @@ def group_posts(group_id):
         return redirect(url_for('group_posts', group_id=group_id))
 
     posts = Post.query.filter_by(group_id=group.id).order_by(Post.id.desc()).all()
-    return render_template('group_posts.html', group=group, posts=posts)
+    image_urls_map = {p.id: _resolve_image_urls(p.image_urls) for p in posts}
+    return render_template('group_posts.html', group=group, posts=posts, image_urls_map=image_urls_map)
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -460,7 +478,7 @@ def api_group_posts(group_id):
         "posts": [{
             "id": p.id,
             "content": p.content,
-            "image_urls": p.image_urls.split(',') if p.image_urls else [],
+            "image_urls": _resolve_image_urls(p.image_urls),
             "user": p.user.username,
             "likes": p.likes,
             "group_id": group.id,
@@ -558,10 +576,10 @@ def api_add_post_media(post_id):
     if not files:
         return jsonify({"error": "Files required"}), 400
     image_urls = store_files(files)
-    existing = post.image_urls.split(',') if post.image_urls else []
+    existing = _split_image_urls(post.image_urls)
     post.image_urls = ','.join(existing + image_urls)
     db.session.commit()
-    return jsonify({"message": "Attached", "image_urls": post.image_urls.split(',')})
+    return jsonify({"message": "Attached", "image_urls": _resolve_image_urls(post.image_urls)})
 
 
 @app.route('/api/posts/<int:post_id>/media/base64', methods=['POST'])
@@ -577,10 +595,10 @@ def api_add_post_media_base64(post_id):
     image_urls = store_base64_files(files)
     if not image_urls:
         return jsonify({"error": "No valid files"}), 400
-    existing = post.image_urls.split(',') if post.image_urls else []
+    existing = _split_image_urls(post.image_urls)
     post.image_urls = ','.join(existing + image_urls)
     db.session.commit()
-    return jsonify({"message": "Attached", "image_urls": post.image_urls.split(',')})
+    return jsonify({"message": "Attached", "image_urls": _resolve_image_urls(post.image_urls)})
 
 if __name__ == '__main__':
     if not os.path.exists('groupo.db'):

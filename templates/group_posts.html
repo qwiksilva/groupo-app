@@ -122,10 +122,10 @@
             <img class="avatar" src="https://api.dicebear.com/7.x/initials/svg?seed={{ post.user.username }}" alt="avatar">
             <strong>{{ post.user.username }}</strong>: {{ post.content }}<br>
 
-            {% if post.image_urls %}
+            {% if image_urls_map.get(post.id) %}
             <div class="image-preview">
-                {% for url in post.image_urls.split(',') %}
-                    {% set ext = url.split('.')[-1] %}
+                {% for url in image_urls_map.get(post.id) %}
+                    {% set ext = url.split('?', 1)[0].split('.')[-1] %}
                     {% if ext in ['mp4', 'webm', 'ogg'] %}
                         <video controls style="max-width: 300px; margin-top: 10px;">
                             <source src="{{ url }}" type="video/{{ ext }}">

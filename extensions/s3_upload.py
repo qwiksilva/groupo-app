@@ -28,10 +28,7 @@ def upload_file_to_s3(files):
     client, bucket = _get_s3()
     if not client or not bucket:
         raise RuntimeError("S3 not configured (missing AWS keys or bucket name).")
-    region = os.environ.get("AWS_REGION", "us-east-1")
-
-    urls = []
-    expires = int(os.environ.get("S3_URL_EXPIRES", 60 * 60 * 24))  # default 24h
+    keys = []
 
     for file in files:
         if file and allowed_file(file.filename):
@@ -45,30 +42,21 @@ def upload_file_to_s3(files):
                     'ContentType': file.content_type or 'application/octet-stream',
                 }
             )
-            presigned = client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": filename},
-                ExpiresIn=expires,
-            )
-            print(f"[upload] presigned for bucket={bucket} region={region} key={filename}")
-            print(f"[upload] url={presigned}")
-            urls.append(presigned)
+            keys.append(filename)
         else:
             if not file:
                 print("[upload] skipped empty file object")
             elif not allowed_file(file.filename):
                 print(f"[upload] skipped disallowed extension: {file.filename}")
-    return urls
+    return keys
 
 
 def upload_bytes_to_s3(items):
     client, bucket = _get_s3()
     if not client or not bucket:
         raise RuntimeError("S3 not configured (missing AWS keys or bucket name).")
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    expires = int(os.environ.get("S3_URL_EXPIRES", 60 * 60 * 24))
 
-    urls = []
+    keys = []
     for item in items:
         data = item.get("data")
         filename = item.get("filename")
@@ -85,12 +73,23 @@ def upload_bytes_to_s3(items):
                 'ContentType': item.get("content_type") or 'application/octet-stream',
             }
         )
+        keys.append(filename)
+    return keys
+
+
+def presign_keys(keys, expires=None):
+    client, bucket = _get_s3()
+    if not client or not bucket:
+        raise RuntimeError("S3 not configured (missing AWS keys or bucket name).")
+    if not keys:
+        return []
+    ttl = int(expires or os.environ.get("S3_URL_EXPIRES", 60 * 60 * 24))
+    urls = []
+    for key in keys:
         presigned = client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": bucket, "Key": filename},
-            ExpiresIn=expires,
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=ttl,
         )
-        print(f"[upload] presigned for bucket={bucket} region={region} key={filename}")
-        print(f"[upload] url={presigned}")
         urls.append(presigned)
     return urls

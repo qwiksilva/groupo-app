@@ -315,9 +315,15 @@ const HomeScreen = () => {
         return;
       }
       if (media.length) {
-        await createPostWithFiles(targetGroup, content, media);
+        const res = await createPostWithFiles(targetGroup, content, media);
+        if (res.uploadQuality === 'low') {
+          setStatus('Uploaded in lower quality due to size.');
+        } else {
+          setStatus('');
+        }
       } else {
         await createPost(targetGroup, content);
+        setStatus('');
       }
       setContent('');
       setMedia([]);

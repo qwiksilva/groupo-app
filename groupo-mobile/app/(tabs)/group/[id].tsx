@@ -122,9 +122,15 @@ const GroupDetail = () => {
     if (!content) return;
     try {
       if (media.length) {
-        await createPostWithFiles(groupId, content, media);
+        const res = await createPostWithFiles(groupId, content, media);
+        if (res.uploadQuality === 'low') {
+          setStatus('Uploaded in lower quality due to size.');
+        } else {
+          setStatus('');
+        }
       } else {
         await createPost(groupId, content);
+        setStatus('');
       }
       setContent('');
       setMedia([]);

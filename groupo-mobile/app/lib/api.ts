@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 // Point to your backend; on device use your machine's LAN IP.
 export const API_URL = 'https://groupo-app.onrender.com';
@@ -52,6 +53,7 @@ export const createPostWithFiles = async (
   content: string,
   files: { uri: string; name?: string; mimeType?: string }[]
 ) => {
+  let usedLowQuality = false;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Connection: 'close',
@@ -95,45 +97,111 @@ export const createPostWithFiles = async (
     }
   };
 
-  const readAsBase64 = async (file: { uri: string; name?: string; mimeType?: string }) => {
-    const data = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+  const normalizeImage = async (
+    file: { uri: string; name?: string; mimeType?: string },
+    profile: { width: number; compress: number }
+  ) => {
+    if (!file.mimeType?.startsWith('image/')) {
+      return file;
+    }
+    const result = await ImageManipulator.manipulateAsync(
+      file.uri,
+      [{ resize: { width: profile.width } }],
+      { compress: profile.compress, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const name = file.name && file.name.includes('.') ? file.name.replace(/\.[^.]+$/, '.jpg') : 'upload.jpg';
+    return { ...file, uri: result.uri, mimeType: 'image/jpeg', name };
+  };
+
+  const readAsBase64 = async (
+    file: { uri: string; name?: string; mimeType?: string },
+    profile: { width: number; compress: number; cap: number }
+  ) => {
+    const normalized = await normalizeImage(file, profile);
+    const data = await FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 });
+    if (data.length > profile.cap) {
+      throw new Error('Image too large to upload.');
+    }
     return {
-      name: file.name || 'upload',
-      mimeType: file.mimeType || 'application/octet-stream',
+      name: normalized.name || 'upload',
+      mimeType: normalized.mimeType || 'application/octet-stream',
       data,
     };
   };
 
-  const uploadBase64Create = async (payloadFiles: { name: string; mimeType: string; data: string }[]) => {
-    const { data } = await api.post(`/api/groups/${groupId}/posts/base64`, {
-      content,
-      files: payloadFiles,
+  const HIGH_QUALITY = { width: 1280, compress: 0.7, cap: 170000 };
+  const LOW_QUALITY = { width: 700, compress: 0.45, cap: 200000 };
+
+  const readAsBase64WithFallback = async (file: { uri: string; name?: string; mimeType?: string }) => {
+    try {
+      const payload = await readAsBase64(file, HIGH_QUALITY);
+      return { payload, quality: 'high' as const };
+    } catch {
+      const payload = await readAsBase64(file, LOW_QUALITY);
+      return { payload, quality: 'low' as const };
+    }
+  };
+
+  const uploadCreateWithRetry = async (file: { uri: string; name?: string; mimeType?: string }) => {
+    const firstTry = await readAsBase64WithFallback(file);
+    try {
+      const response = await uploadBase64Create([firstTry.payload]);
+      return { response, quality: firstTry.quality };
+    } catch {
+      const payload = await readAsBase64(file, LOW_QUALITY);
+      const response = await uploadBase64Create([payload]);
+      return { response, quality: 'low' as const };
+    }
+  };
+
+  const uploadMediaWithRetry = async (postId: number, file: { uri: string; name?: string; mimeType?: string }) => {
+    const firstTry = await readAsBase64WithFallback(file);
+    try {
+      await uploadBase64Media(postId, [firstTry.payload]);
+      return firstTry.quality;
+    } catch {
+      const payload = await readAsBase64(file, LOW_QUALITY);
+      await uploadBase64Media(postId, [payload]);
+      return 'low' as const;
+    }
+  };
+
+  const postJson = async (path: string, body: Record<string, unknown>) => {
+    const payload = JSON.stringify(body);
+    console.log('[upload] base64 payload size', { bytes: payload.length, path });
+    const { data } = await api.post(path, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(typeof auth === 'string' && auth.length ? { Authorization: auth } : {}),
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 30000,
+      validateStatus: () => true,
     });
+    if (data?.error) {
+      throw new Error(data.error);
+    }
     return data;
   };
 
-  const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) => {
-    const { data } = await api.post(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
-    return data;
-  };
+  const uploadBase64Create = async (payloadFiles: { name: string; mimeType: string; data: string }[]) =>
+    await postJson(`/api/groups/${groupId}/posts/base64`, { content, files: payloadFiles });
+
+  const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) =>
+    await postJson(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
 
   if (files.length === 1) {
     const file = files[0];
-    try {
-      return await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, file, { content });
-    } catch {
-      const payload = [await readAsBase64(file)];
-      return await uploadBase64Create(payload);
-    }
+    const result = await uploadCreateWithRetry(file);
+    return { response: result.response, uploadQuality: result.quality };
   }
 
   const [first, ...rest] = files;
-  let firstResp: any;
-  try {
-    firstResp = await uploadSingle(`${API_URL}/api/groups/${groupId}/posts`, first, { content });
-  } catch {
-    const payload = await Promise.all(files.map(readAsBase64));
-    return await uploadBase64Create(payload);
+  const firstResult = await uploadCreateWithRetry(first);
+  const firstResp = firstResult.response;
+  if (firstResult.quality === 'low') {
+    usedLowQuality = true;
   }
 
   const postId = firstResp?.post_id;
@@ -141,14 +209,12 @@ export const createPostWithFiles = async (
     throw new Error('Upload failed (missing post id)');
   }
   for (const file of rest) {
-    try {
-      await uploadSingle(`${API_URL}/api/posts/${postId}/media`, file);
-    } catch {
-      const payload = [await readAsBase64(file)];
-      await uploadBase64Media(postId, payload);
+    const quality = await uploadMediaWithRetry(postId, file);
+    if (quality === 'low') {
+      usedLowQuality = true;
     }
   }
-  return firstResp;
+  return { response: firstResp, uploadQuality: usedLowQuality ? ('low' as const) : ('high' as const) };
 };
 
 export const createGroup = async (name: string) => {

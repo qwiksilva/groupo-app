@@ -1,0 +1,11 @@
+Photos get cut off vertically - Done
+Stay logged in - Done
+Save creds to phone
+can only post 5 photos at a time
+create post button in middle that brings to a posting page- drop down to select group to post in, autoselected if pressed while viewing a group
+Move setting button in group to top right nav bar
+notifications on likes and comments
+video posts not working correctly
+post text gets hidden when trying to type - bring to own positn gpage and move text to top to deconflict with keyboard
+preview media selected for posting in posting screen
+move "Send" button for comment to in text field, make arrow, to save space on screen
