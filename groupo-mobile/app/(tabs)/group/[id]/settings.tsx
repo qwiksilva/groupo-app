@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { SafeAreaView, Text, TextInput, Button, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { SafeAreaView, Text, TextInput, Button, StyleSheet, FlatList, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { updateGroup, addGroupMember } from '../../../lib/api';
+import { updateGroup, addGroupMember, fetchGroupMembers } from '../../../lib/api';
 
 const GroupSettings = () => {
   const params = useLocalSearchParams<{ id: string; name?: string }>();
@@ -11,6 +11,20 @@ const GroupSettings = () => {
   const [name, setName] = useState(params.name || '');
   const [usernameToAdd, setUsernameToAdd] = useState('');
   const [status, setStatus] = useState('');
+  const [members, setMembers] = useState<any[]>([]);
+
+  const loadMembers = async () => {
+    try {
+      const data = await fetchGroupMembers(groupId);
+      setMembers(data || []);
+    } catch (err: any) {
+      setStatus(err.response?.data?.error || err.message);
+    }
+  };
+
+  useEffect(() => {
+    loadMembers();
+  }, [groupId]);
 
   const saveName = async () => {
     try {
@@ -27,6 +41,7 @@ const GroupSettings = () => {
       await addGroupMember(groupId, usernameToAdd);
       setStatus(`Added ${usernameToAdd}`);
       setUsernameToAdd('');
+      loadMembers();
     } catch (err: any) {
       setStatus(err.response?.data?.error || err.message);
     }
@@ -49,6 +64,18 @@ const GroupSettings = () => {
       />
       <Button title="Add" onPress={addMember} />
 
+      <Text style={[styles.label, { marginTop: 20 }]}>Members</Text>
+      <FlatList
+        data={members}
+        keyExtractor={(m) => m.id.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.memberRow}>
+            <Text style={styles.memberName}>{item.username}</Text>
+            <Text style={styles.memberSub}>{item.first_name} {item.last_name}</Text>
+          </View>
+        )}
+      />
+
       {status ? <Text style={styles.status}>{status}</Text> : null}
       <Button title="Back to group" onPress={() => router.back()} />
     </SafeAreaView>
@@ -61,6 +88,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 16, fontWeight: '600', marginTop: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   status: { marginTop: 8, color: '#c00' },
+  memberRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  memberName: { fontSize: 16, fontWeight: '600' },
+  memberSub: { color: '#666' },
 });
 
 export default GroupSettings;

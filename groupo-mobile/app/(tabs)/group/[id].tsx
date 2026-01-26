@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useLayoutEffect } from 'react';
-import { SafeAreaView, View, Text, FlatList, TextInput, Button, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity } from 'react-native';
+import { SafeAreaView, View, Text, FlatList, TextInput, Button, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { useLocalSearchParams, useNavigation, useRouter, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -23,6 +24,25 @@ const PostImage = ({ uri }: { uri: string }) => (
   </View>
 );
 
+const isVideoUrl = (uri: string) => {
+  const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
+  return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
+};
+
+const PostMedia = ({ uri }: { uri: string }) => (
+  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
+    {isVideoUrl(uri) ? (
+      <Video
+        source={{ uri }}
+        style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]}
+        resizeMode={ResizeMode.CONTAIN}
+        useNativeControls
+      />
+    ) : (
+      <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
+    )}
+  </View>
+);
 const GroupDetail = () => {
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const groupId = Number(params.id);
@@ -31,6 +51,9 @@ const GroupDetail = () => {
   const [posts, setPosts] = useState<any[]>([]);
   const [status, setStatus] = useState('');
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
+  const [activeCommentPostId, setActiveCommentPostId] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [showCommentModal, setShowCommentModal] = useState(false);
   const navigation = useNavigation();
   const router = useRouter();
   const colorScheme = useColorScheme();
@@ -123,6 +146,27 @@ const GroupDetail = () => {
     }
   };
 
+  const openCommentModal = (postId: number) => {
+    setActiveCommentPostId(postId);
+    setCommentDraft(commentInputs[postId] || '');
+    setShowCommentModal(true);
+  };
+
+  const closeCommentModal = () => {
+    setShowCommentModal(false);
+    setActiveCommentPostId(null);
+    setCommentDraft('');
+  };
+
+  const submitCommentModal = async () => {
+    if (!activeCommentPostId) return;
+    const text = commentDraft.trim();
+    if (!text) return;
+    setCommentInputs((prev) => ({ ...prev, [activeCommentPostId]: text }));
+    await handleComment(activeCommentPostId);
+    closeCommentModal();
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>{groupName}</Text>
@@ -136,7 +180,7 @@ const GroupDetail = () => {
             {item.image_urls?.length ? (
               <ScrollView horizontal pagingEnabled style={styles.carousel}>
                 {item.image_urls.map((u: string, idx: number) => (
-                  <PostImage key={idx} uri={resolveUrl(u)} />
+                  <PostMedia key={idx} uri={resolveUrl(u)} />
                 ))}
               </ScrollView>
             ) : null}
@@ -149,19 +193,35 @@ const GroupDetail = () => {
                 {c.user}: {c.content}
               </Text>
             ))}
-            <View style={styles.commentRow}>
-              <TextInput
-                placeholder="Add a comment"
-                style={styles.input}
-                value={commentInputs[item.id] || ''}
-                onChangeText={(t) => setCommentInputs((prev) => ({ ...prev, [item.id]: t }))}
-              />
-              <Button title="Send" onPress={() => handleComment(item.id)} />
-            </View>
+            <TouchableOpacity style={styles.commentRow} onPress={() => openCommentModal(item.id)}>
+              <Text style={styles.commentPlaceholder}>Add a comment…</Text>
+            </TouchableOpacity>
           </View>
         )}
       />
       {status ? <Text style={styles.status}>{status}</Text> : null}
+      <Modal visible={showCommentModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalCard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>New Comment</Text>
+              <Button title="Post" onPress={submitCommentModal} />
+            </View>
+            <TextInput
+              placeholder="Write a comment..."
+              style={[styles.input, styles.modalInput]}
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              multiline
+              autoFocus
+            />
+            <Button title="Cancel" onPress={closeCommentModal} />
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -191,7 +251,13 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   likeText: { fontWeight: '600' },
   commentLine: { marginTop: 4, color: '#444' },
-  commentRow: { marginTop: 6 },
+  commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
+  commentPlaceholder: { color: '#666' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-start' },
+  modalCard: { marginTop: 40, marginHorizontal: 16, backgroundColor: '#fff', borderRadius: 12, padding: 12, gap: 10 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { fontSize: 16, fontWeight: '700' },
+  modalInput: { minHeight: 90, textAlignVertical: 'top' },
   headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
 });
 

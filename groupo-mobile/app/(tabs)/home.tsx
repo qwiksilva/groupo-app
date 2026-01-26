@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Image, ScrollView, Dimensions } from 'react-native';
+import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Image, ScrollView, Dimensions, Modal, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -25,6 +26,26 @@ const PostImage = ({ uri }: { uri: string }) => (
   </View>
 );
 
+const isVideoUrl = (uri: string) => {
+  const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
+  return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
+};
+
+const PostMedia = ({ uri }: { uri: string }) => (
+  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
+    {isVideoUrl(uri) ? (
+      <Video
+        source={{ uri }}
+        style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]}
+        resizeMode={ResizeMode.CONTAIN}
+        useNativeControls
+      />
+    ) : (
+      <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
+    )}
+  </View>
+);
+
 const HomeScreen = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [user, setUser] = useState<any>(null);
@@ -36,6 +57,9 @@ const HomeScreen = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
+  const [activeCommentPostId, setActiveCommentPostId] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [showCommentModal, setShowCommentModal] = useState(false);
   const usernameRef = useRef<TextInput>(null);
   const firstNameRef = useRef<TextInput>(null);
   const lastNameRef = useRef<TextInput>(null);
@@ -274,6 +298,27 @@ const HomeScreen = () => {
       setStatus(err.response?.data?.error || err.message);
     }
   };
+
+  const openCommentModal = (postId: number) => {
+    setActiveCommentPostId(postId);
+    setCommentDraft(commentInputs[postId] || '');
+    setShowCommentModal(true);
+  };
+
+  const closeCommentModal = () => {
+    setShowCommentModal(false);
+    setActiveCommentPostId(null);
+    setCommentDraft('');
+  };
+
+  const submitCommentModal = async () => {
+    if (!activeCommentPostId) return;
+    const text = commentDraft.trim();
+    if (!text) return;
+    setCommentInputs((prev) => ({ ...prev, [activeCommentPostId]: text }));
+    await handleComment(activeCommentPostId);
+    closeCommentModal();
+  };
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerRow}>
@@ -292,7 +337,7 @@ const HomeScreen = () => {
             {item.image_urls?.length ? (
               <ScrollView horizontal pagingEnabled style={styles.carousel}>
                 {item.image_urls.map((u: string, idx: number) => (
-                  <PostImage key={idx} uri={resolveUrl(u)} />
+                  <PostMedia key={idx} uri={resolveUrl(u)} />
                 ))}
               </ScrollView>
             ) : null}
@@ -305,19 +350,35 @@ const HomeScreen = () => {
                 {c.user}: {c.content}
               </Text>
             ))}
-            <View style={styles.commentRow}>
-              <TextInput
-                placeholder="Add a comment"
-                style={styles.input}
-                value={commentInputs[item.id] || ''}
-                onChangeText={(t) => setCommentInputs((prev) => ({ ...prev, [item.id]: t }))}
-              />
-              <Button title="Send" onPress={() => handleComment(item.id)} />
-            </View>
+            <TouchableOpacity style={styles.commentRow} onPress={() => openCommentModal(item.id)}>
+              <Text style={styles.commentPlaceholder}>Add a comment…</Text>
+            </TouchableOpacity>
           </View>
         )}
       />
       {status ? <Text style={styles.status}>{status}</Text> : null}
+      <Modal visible={showCommentModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalCard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>New Comment</Text>
+              <Button title="Post" onPress={submitCommentModal} />
+            </View>
+            <TextInput
+              placeholder="Write a comment..."
+              style={[styles.input, styles.modalInput]}
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              multiline
+              autoFocus
+            />
+            <Button title="Cancel" onPress={closeCommentModal} />
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -351,7 +412,13 @@ const HomeScreen = () => {
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   likeText: { fontWeight: '600' },
   commentLine: { marginTop: 4, color: '#444' },
-  commentRow: { marginTop: 6 },
+  commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
+  commentPlaceholder: { color: '#666' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-start' },
+  modalCard: { marginTop: 40, marginHorizontal: 16, backgroundColor: '#fff', borderRadius: 12, padding: 12, gap: 10 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { fontSize: 16, fontWeight: '700' },
+  modalInput: { minHeight: 90, textAlignVertical: 'top' },
 });
 
 export default HomeScreen;

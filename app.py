@@ -566,12 +566,20 @@ def api_update_group(group_id):
     return jsonify({"group": {"id": group.id, "name": group.name}})
 
 
-@app.route('/api/groups/<int:group_id>/members', methods=['POST'])
+@app.route('/api/groups/<int:group_id>/members', methods=['GET', 'POST'])
 @token_required
 def api_add_group_member_api(group_id):
     group = Group.query.get_or_404(group_id)
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
+    if request.method == 'GET':
+        members = [{
+            "id": m.id,
+            "username": m.username,
+            "first_name": m.first_name,
+            "last_name": m.last_name,
+        } for m in group.members]
+        return jsonify({"members": members})
     data = request.get_json() or {}
     username = data.get('username')
     if not username:

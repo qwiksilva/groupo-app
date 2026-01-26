@@ -38,6 +38,11 @@ export const fetchGroups = async () => {
   return data.groups;
 };
 
+export const fetchGroupMembers = async (groupId: number) => {
+  const { data } = await api.get(`/api/groups/${groupId}/members`);
+  return data.members;
+};
+
 export const fetchGroupPosts = async (groupId: number) => {
   const { data } = await api.get(`/api/groups/${groupId}/posts`);
   return data; // { group, posts }
