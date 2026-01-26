@@ -119,8 +119,10 @@ export const createPostWithFiles = async (
   ) => {
     const normalized = await normalizeImage(file, profile);
     const data = await FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 });
-    if (data.length > profile.cap) {
-      throw new Error('Image too large to upload.');
+    const isVideo = (normalized.mimeType || file.mimeType || '').startsWith('video/');
+    const cap = isVideo ? VIDEO_BASE64_CAP : profile.cap;
+    if (data.length > cap) {
+      throw new Error('Media too large to upload.');
     }
     return {
       name: normalized.name || 'upload',
@@ -131,6 +133,7 @@ export const createPostWithFiles = async (
 
   const HIGH_QUALITY = { width: 1280, compress: 0.7, cap: 170000 };
   const LOW_QUALITY = { width: 700, compress: 0.45, cap: 200000 };
+  const VIDEO_BASE64_CAP = 8_000_000;
 
   const readAsBase64WithFallback = async (file: { uri: string; name?: string; mimeType?: string }) => {
     try {

@@ -24,6 +24,7 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 USE_S3 = os.environ.get('RENDER') == 'true'
 if USE_S3:
     print("[startup] RENDER=true detected; will attempt S3 uploads. Ensure AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/S3_BUCKET_NAME are set.")
+MAX_MEDIA_PER_POST = int(os.environ.get('MAX_MEDIA_PER_POST', 20))
 
 bcrypt = Bcrypt(app)
 db = SQLAlchemy(app)
@@ -99,6 +100,9 @@ MIME_EXTENSION_MAP = {
     'video/mp4': 'mp4',
     'video/webm': 'webm',
     'video/ogg': 'ogg',
+    'video/quicktime': 'mov',
+    'video/hevc': 'hevc',
+    'video/x-m4v': 'm4v',
 }
 
 
@@ -122,16 +126,19 @@ def store_base64_files(files):
     for payload in files:
         data = payload.get('data') or payload.get('base64')
         if not data:
+            print("[upload] base64 skip: missing data")
             continue
         if isinstance(data, str) and data.startswith('data:') and ',' in data:
             data = data.split(',', 1)[1]
         try:
             raw = base64.b64decode(data)
         except Exception:
+            print("[upload] base64 skip: decode failed")
             continue
         mime_type = payload.get('mimeType') or payload.get('mime_type')
         filename = _normalize_filename(payload.get('name'), mime_type)
         if not filename:
+            print(f"[upload] base64 skip: invalid filename or mime name={payload.get('name')} mime={mime_type}")
             continue
         unique = f"{uuid4().hex}_{filename}"
         items.append({
@@ -272,6 +279,8 @@ def group_posts(group_id):
     if request.method == 'POST':
         content = request.form.get('content')
         files = request.files.getlist('file')
+        if len(files) > MAX_MEDIA_PER_POST:
+            return abort(400, description=f"Too many files (max {MAX_MEDIA_PER_POST}).")
         image_urls = store_files(files)
         post = Post(content=content, user_id=current_user.id, group_id=group.id, image_urls=','.join(image_urls))
         db.session.add(post)
@@ -302,6 +311,9 @@ def comment_post(post_id):
     comment = Comment(content=content, user_id=current_user.id, post=post)
     db.session.add(comment)
     db.session.commit()
+    group = Group.query.get(post.group_id)
+    if group:
+        notify_group_members_comment(group, current_user, post, comment)
     return jsonify({"message": "Comment added."})
 
 @app.route('/delete_post/<int:post_id>', methods=['POST'])
@@ -377,6 +389,31 @@ def notify_group_members(group: Group, actor: User, post: Post):
             "title": f"New post in {group.name}",
             "body": f"{actor.username} posted: {post.content[:80]}",
             "data": {"group_id": group.id, "post_id": post.id},
+        }
+        try:
+            resp = requests.post(expo_endpoint, json=payload, timeout=5)
+            if resp.status_code != 200:
+                print(f"[notify] failed status={resp.status_code} token={t.token} body={resp.text}")
+        except Exception as exc:
+            print(f"[notify] error token={t.token} exc={exc}")
+
+
+def notify_group_members_comment(group: Group, actor: User, post: Post, comment: Comment):
+    skip_ids = {actor.id}
+    if post.user_id:
+        skip_ids.add(post.user_id)
+    member_ids = [m.id for m in group.members if m.id not in skip_ids]
+    tokens = DeviceToken.query.filter(DeviceToken.user_id.in_(member_ids)).all()
+    if not tokens:
+        return
+
+    expo_endpoint = os.environ.get("EXPO_PUSH_URL", "https://exp.host/--/api/v2/push/send")
+    for t in tokens:
+        payload = {
+            "to": t.token,
+            "title": f"New comment in {group.name}",
+            "body": f"{actor.username}: {comment.content[:80]}",
+            "data": {"group_id": group.id, "post_id": post.id, "comment_id": comment.id, "type": "comment"},
         }
         try:
             resp = requests.post(expo_endpoint, json=payload, timeout=5)
@@ -465,6 +502,8 @@ def api_group_posts(group_id):
         if not content:
             return jsonify({"error": "Content required"}), 400
         files = request.files.getlist('file')
+        if len(files) > MAX_MEDIA_PER_POST:
+            return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
         image_urls = store_files(files)
         post = Post(content=content, user_id=g.api_user.id, group_id=group.id, image_urls=','.join(image_urls))
         db.session.add(post)
@@ -501,6 +540,8 @@ def api_group_posts_base64(group_id):
         return jsonify({"error": "Content required"}), 400
     if not files:
         return jsonify({"error": "Files required"}), 400
+    if len(files) > MAX_MEDIA_PER_POST:
+        return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
     image_urls = store_base64_files(files)
     if not image_urls:
         return jsonify({"error": "No valid files"}), 400
@@ -563,6 +604,9 @@ def api_comment_post(post_id):
     comment = Comment(content=content, user_id=g.api_user.id, post=post)
     db.session.add(comment)
     db.session.commit()
+    group = Group.query.get(post.group_id)
+    if group:
+        notify_group_members_comment(group, g.api_user, post, comment)
     return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username}})
 
 
@@ -575,8 +619,11 @@ def api_add_post_media(post_id):
     files = request.files.getlist('file')
     if not files:
         return jsonify({"error": "Files required"}), 400
-    image_urls = store_files(files)
     existing = _split_image_urls(post.image_urls)
+    total_count = len(existing) + len(files)
+    if total_count > MAX_MEDIA_PER_POST:
+        return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
+    image_urls = store_files(files)
     post.image_urls = ','.join(existing + image_urls)
     db.session.commit()
     return jsonify({"message": "Attached", "image_urls": _resolve_image_urls(post.image_urls)})
@@ -592,10 +639,13 @@ def api_add_post_media_base64(post_id):
     files = data.get('files') or []
     if not files:
         return jsonify({"error": "Files required"}), 400
+    existing = _split_image_urls(post.image_urls)
+    total_count = len(existing) + len(files)
+    if total_count > MAX_MEDIA_PER_POST:
+        return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
     image_urls = store_base64_files(files)
     if not image_urls:
         return jsonify({"error": "No valid files"}), 400
-    existing = _split_image_urls(post.image_urls)
     post.image_urls = ','.join(existing + image_urls)
     db.session.commit()
     return jsonify({"message": "Attached", "image_urls": _resolve_image_urls(post.image_urls)})

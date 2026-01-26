@@ -1,9 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Image, ScrollView, Dimensions } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect } from 'expo-router';
 import {
   login,
@@ -14,8 +11,6 @@ import {
   resolveUrl,
   likePost,
   commentOnPost,
-  createPost,
-  createPostWithFiles,
   setToken,
 } from '../lib/api';
 
@@ -23,46 +18,6 @@ const IMAGE_WIDTH = Dimensions.get('window').width - 32; // container padding ma
 const POST_IMAGE_HEIGHT = Math.round(IMAGE_WIDTH * 1.5); // tall enough for portrait photos
 const TOKEN_KEY = 'groupo_auth_token';
 const USER_KEY = 'groupo_user';
-
-const extensionFromMime = (mime?: string) => {
-  if (!mime) return null;
-  if (mime === 'image/jpeg') return 'jpg';
-  if (mime === 'image/heic') return 'heic';
-  if (mime === 'image/heif') return 'heif';
-  if (mime === 'image/png') return 'png';
-  if (mime === 'image/gif') return 'gif';
-  if (mime === 'video/mp4') return 'mp4';
-  if (mime === 'video/webm') return 'webm';
-  if (mime === 'video/ogg') return 'ogg';
-  return null;
-};
-
-const buildUploadName = (asset: ImagePicker.ImagePickerAsset) => {
-  if (asset.fileName && asset.fileName.includes('.')) {
-    return asset.fileName;
-  }
-  const uriExt = asset.uri.split('?')[0].split('.').pop();
-  if (uriExt && uriExt !== asset.uri) {
-    return `upload.${uriExt}`;
-  }
-  const mimeExt = extensionFromMime(asset.mimeType);
-  return `upload.${mimeExt || (asset.type === 'video' ? 'mp4' : 'jpg')}`;
-};
-
-const resolveAssetUri = async (asset: ImagePicker.ImagePickerAsset) => {
-  if (!asset.uri.startsWith('ph://') && !asset.uri.startsWith('assets-library://')) {
-    return asset.uri;
-  }
-  if (!asset.assetId) {
-    return asset.uri;
-  }
-  try {
-    const info = await MediaLibrary.getAssetInfoAsync(asset.assetId);
-    return info.localUri || info.uri || asset.uri;
-  } catch {
-    return asset.uri;
-  }
-};
 
 const PostImage = ({ uri }: { uri: string }) => (
   <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
@@ -80,9 +35,11 @@ const HomeScreen = () => {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [content, setContent] = useState('');
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
-  const [media, setMedia] = useState<any[]>([]);
+  const usernameRef = useRef<TextInput>(null);
+  const firstNameRef = useRef<TextInput>(null);
+  const lastNameRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const handleLogout = useCallback(
     async (message = 'Logged out.') => {
@@ -212,12 +169,69 @@ const HomeScreen = () => {
             Register
           </Text>
         </View>
-        <TextInput placeholder="Username" style={styles.input} value={username} onChangeText={setUsername} autoCapitalize="none" />
-        <TextInput placeholder="Password" style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
+        <TextInput
+          placeholder="Username"
+          style={styles.input}
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="username"
+          textContentType="username"
+          importantForAutofill="yes"
+          returnKeyType={authMode === 'register' ? 'next' : 'done'}
+          onSubmitEditing={() => {
+            if (authMode === 'register') {
+              firstNameRef.current?.focus();
+            } else {
+              passwordRef.current?.focus();
+            }
+          }}
+          blurOnSubmit={false}
+          ref={usernameRef}
+        />
+        <TextInput
+          placeholder="Password"
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete={authMode === 'register' ? 'new-password' : 'password'}
+          textContentType={authMode === 'register' ? 'newPassword' : 'password'}
+          importantForAutofill="yes"
+          passwordRules="minlength: 8;"
+          returnKeyType="done"
+          onSubmitEditing={handleAuth}
+          ref={passwordRef}
+        />
         {authMode === 'register' && (
           <>
-            <TextInput placeholder="First name" style={styles.input} value={firstName} onChangeText={setFirstName} />
-            <TextInput placeholder="Last name" style={styles.input} value={lastName} onChangeText={setLastName} />
+            <TextInput
+              placeholder="First name"
+              style={styles.input}
+              value={firstName}
+              onChangeText={setFirstName}
+              autoComplete="given-name"
+              textContentType="givenName"
+              returnKeyType="next"
+              onSubmitEditing={() => lastNameRef.current?.focus()}
+              blurOnSubmit={false}
+              ref={firstNameRef}
+            />
+            <TextInput
+              placeholder="Last name"
+              style={styles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              autoComplete="family-name"
+              textContentType="familyName"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              blurOnSubmit={false}
+              ref={lastNameRef}
+            />
           </>
         )}
         <Button title={authMode === 'login' ? 'Login' : 'Register'} onPress={handleAuth} />
@@ -260,100 +274,12 @@ const HomeScreen = () => {
       setStatus(err.response?.data?.error || err.message);
     }
   };
-
-  const pickMedia = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      setStatus('Media permission required');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      quality: 0.8,
-      allowsMultipleSelection: true,
-      selectionLimit: 5,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-    });
-    if (!result.canceled && result.assets?.length) {
-      const normalizedAssets = await Promise.all(
-        result.assets.map(async (asset) => ({
-          asset,
-          uri: await resolveAssetUri(asset),
-        }))
-      );
-      const unresolved = normalizedAssets.find(({ uri }) => uri.startsWith('ph://') || uri.startsWith('assets-library://'));
-      if (unresolved) {
-        setStatus('Selected media could not be accessed. Try picking a different item or allow full photo access.');
-        return;
-      }
-      const fileInfos = await Promise.all(
-        normalizedAssets.map(async ({ uri }) => ({ uri, info: await FileSystem.getInfoAsync(uri) }))
-      );
-      console.log('[upload] picked file info', fileInfos);
-      const missingFile = fileInfos.find(({ info }) => !info.exists);
-      if (missingFile) {
-        setStatus('Selected media is not available on this device. Try another photo or download it first.');
-        return;
-      }
-      const files = normalizedAssets.map(({ asset, uri }) => ({
-        uri,
-        name: buildUploadName(asset),
-        mimeType: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
-      }));
-      setMedia(files);
-    }
-  };
-
-  const handlePost = async () => {
-    if (!content) return;
-    try {
-      // Default to first group in feed if none selected, since Home is cross-group.
-      const firstGroupId = feed[0]?.group_id;
-      const targetGroup = firstGroupId;
-      if (!targetGroup) {
-        setStatus('No group available to post into.');
-        return;
-      }
-      if (media.length) {
-        const res = await createPostWithFiles(targetGroup, content, media);
-        if (res.uploadQuality === 'low') {
-          setStatus('Uploaded in lower quality due to size.');
-        } else {
-          setStatus('');
-        }
-      } else {
-        await createPost(targetGroup, content);
-        setStatus('');
-      }
-      setContent('');
-      setMedia([]);
-      loadFeed();
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        await handleLogout('Session expired. Please log in again.');
-        return;
-      }
-      setStatus(err.response?.data?.error || err.message);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Latest posts</Text>
         <Button title="Log out" onPress={() => handleLogout('Logged out.')} />
       </View>
-      {/* <View style={styles.postInput}>
-        <TextInput
-          placeholder="Write something..."
-          style={styles.input}
-          value={content}
-          onChangeText={setContent}
-        />
-        <Button title="Attach photo/video" onPress={pickMedia} />
-        {media.length ? <Text style={styles.attachment}>{media.length} attachment(s) added</Text> : null}
-        <Button title="Post" onPress={handlePost} />
-      </View> */}
       <FlatList
         data={feed}
         keyExtractor={(p) => p.id.toString()}
@@ -422,12 +348,10 @@ const HomeScreen = () => {
   },
   carousel: { marginTop: 8 },
   status: { marginTop: 8, color: '#c00' },
-  postInput: { marginBottom: 12 },
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   likeText: { fontWeight: '600' },
   commentLine: { marginTop: 4, color: '#444' },
   commentRow: { marginTop: 6 },
-  attachment: { marginVertical: 4, color: '#555' },
 });
 
 export default HomeScreen;
