@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Image, ScrollView, Dimensions, Modal, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Modal, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from 'expo-router';
+import { PostCard } from '@/components/post-card';
 import {
   login,
   register,
@@ -12,39 +12,14 @@ import {
   resolveUrl,
   likePost,
   commentOnPost,
+  deletePost,
+  deleteComment,
   setToken,
 } from '../lib/api';
 
-const IMAGE_WIDTH = Dimensions.get('window').width - 32; // container padding margin
-const POST_IMAGE_HEIGHT = Math.round(IMAGE_WIDTH * 1.5); // tall enough for portrait photos
 const TOKEN_KEY = 'groupo_auth_token';
 const USER_KEY = 'groupo_user';
-
-const PostImage = ({ uri }: { uri: string }) => (
-  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
-    <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
-  </View>
-);
-
-const isVideoUrl = (uri: string) => {
-  const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
-  return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
-};
-
-const PostMedia = ({ uri }: { uri: string }) => (
-  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
-    {isVideoUrl(uri) ? (
-      <Video
-        source={{ uri }}
-        style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]}
-        resizeMode={ResizeMode.CONTAIN}
-        useNativeControls
-      />
-    ) : (
-      <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
-    )}
-  </View>
-);
+const FORCE_DELETE_UI = false;
 
 const HomeScreen = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -299,6 +274,50 @@ const HomeScreen = () => {
     }
   };
 
+  const handleDeletePost = async (postId: number) => {
+    try {
+      await deletePost(postId);
+      setFeed((prev) => prev.filter((p) => p.id !== postId));
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
+      setStatus(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleDeleteComment = async (postId: number, commentId: number | string) => {
+    try {
+      await deleteComment(commentId);
+      setFeed((prev) =>
+        prev.map((p) =>
+          p.id === postId ? { ...p, comments: (p.comments || []).filter((c: any) => c.id !== commentId) } : p
+        )
+      );
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout('Session expired. Please log in again.');
+        return;
+      }
+      setStatus(err.response?.data?.error || err.message);
+    }
+  };
+
+  const confirmDeletePost = (postId: number) => {
+    Alert.alert('Delete post?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeletePost(postId) },
+    ]);
+  };
+
+  const confirmDeleteComment = (postId: number, commentId: number | string) => {
+    Alert.alert('Delete comment?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteComment(postId, commentId) },
+    ]);
+  };
+
   const openCommentModal = (postId: number) => {
     setActiveCommentPostId(postId);
     setCommentDraft(commentInputs[postId] || '');
@@ -329,31 +348,23 @@ const HomeScreen = () => {
         data={feed}
         keyExtractor={(p) => p.id.toString()}
         renderItem={({ item }) => (
-          <View style={styles.postCard}>
-            <Text style={styles.postMeta}>
-              {item.user} • {item.group_name || `Group #${item.group_id}`}
-            </Text>
-            <Text>{item.content}</Text>
-            {item.image_urls?.length ? (
-              <ScrollView horizontal pagingEnabled style={styles.carousel}>
-                {item.image_urls.map((u: string, idx: number) => (
-                  <PostMedia key={idx} uri={resolveUrl(u)} />
-                ))}
-              </ScrollView>
-            ) : null}
-            <View style={styles.actionsRow}>
-              <Text style={styles.likeText}>Likes: {item.likes || 0}</Text>
-              <Button title="Like" onPress={() => handleLike(item.id)} />
-            </View>
-            {(item.comments || []).map((c: any) => (
-              <Text key={c.id} style={styles.commentLine}>
-                {c.user}: {c.content}
-              </Text>
-            ))}
-            <TouchableOpacity style={styles.commentRow} onPress={() => openCommentModal(item.id)}>
-              <Text style={styles.commentPlaceholder}>Add a comment…</Text>
-            </TouchableOpacity>
-          </View>
+          <PostCard
+            user={item.user}
+            groupName={item.group_name}
+            groupId={item.group_id}
+            content={item.content}
+            imageUrls={item.image_urls || []}
+            likes={item.likes || 0}
+            comments={item.comments || []}
+            resolveUrl={resolveUrl}
+            onLike={() => handleLike(item.id)}
+            onOpenComment={() => openCommentModal(item.id)}
+            onDeletePost={() => confirmDeletePost(item.id)}
+            onDeleteComment={(commentId) => confirmDeleteComment(item.id, commentId)}
+            currentUserId={user?.id}
+            postUserId={item.user_id}
+            forceDeleteUI={FORCE_DELETE_UI}
+          />
         )}
       />
       {status ? <Text style={styles.status}>{status}</Text> : null}
@@ -391,29 +402,7 @@ const HomeScreen = () => {
   toggleRow: { flexDirection: 'row', gap: 12, marginBottom: 8 },
   toggle: { fontSize: 16, color: '#666' },
   activeToggle: { color: '#000', fontWeight: '700' },
-  postCard: { padding: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginVertical: 6, backgroundColor: '#fafafa' },
-  postMeta: { fontWeight: '600', marginBottom: 4 },
-  postImageContainer: {
-    width: IMAGE_WIDTH,
-    marginTop: 8,
-    marginRight: 8,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  postImage: {
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  carousel: { marginTop: 8 },
   status: { marginTop: 8, color: '#c00' },
-  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
-  likeText: { fontWeight: '600' },
-  commentLine: { marginTop: 4, color: '#444' },
-  commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
-  commentPlaceholder: { color: '#666' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-start' },
   modalCard: { marginTop: 40, marginHorizontal: 16, backgroundColor: '#fff', borderRadius: 12, padding: 12, gap: 10 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

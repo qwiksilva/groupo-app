@@ -2,21 +2,28 @@
   "expo": {
     "name": "groupo-mobile",
     "slug": "groupo-mobile",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "groupomobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "buildNumber": "3",
+      "buildNumber": "4",
       "supportsTablet": true,
       "bundleIdentifier": "com.rcompany.groupo",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryAddUsageDescription": "Allow Groupo to save photos and videos to your library.",
+        "NSPhotoLibraryUsageDescription": "Allow Groupo to access your photos to upload and save media."
       }
     },
     "android": {
+      "permissions": [
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

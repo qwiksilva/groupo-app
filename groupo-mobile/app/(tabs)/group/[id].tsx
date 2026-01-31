@@ -1,55 +1,31 @@
 import React, { useEffect, useState, useCallback, useLayoutEffect } from 'react';
-import { SafeAreaView, View, Text, FlatList, TextInput, Button, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity, Modal, KeyboardAvoidingView, Platform } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { SafeAreaView, View, Text, FlatList, TextInput, Button, StyleSheet, TouchableOpacity, Modal, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { PostCard } from '@/components/post-card';
 import {
   api,
   fetchGroupPosts,
   resolveUrl,
   likePost,
   commentOnPost,
+  deletePost,
+  deleteComment,
   setToken,
 } from '../../lib/api';
 
-const IMAGE_WIDTH = Dimensions.get('window').width - 32;
-const POST_IMAGE_HEIGHT = Math.round(IMAGE_WIDTH * 1.5); // tall enough for portrait photos
-
-const PostImage = ({ uri }: { uri: string }) => (
-  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
-    <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
-  </View>
-);
-
-const isVideoUrl = (uri: string) => {
-  const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
-  return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
-};
-
-const PostMedia = ({ uri }: { uri: string }) => (
-  <View style={[styles.postImageContainer, { height: POST_IMAGE_HEIGHT }]}>
-    {isVideoUrl(uri) ? (
-      <Video
-        source={{ uri }}
-        style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]}
-        resizeMode={ResizeMode.CONTAIN}
-        useNativeControls
-      />
-    ) : (
-      <Image source={{ uri }} style={[styles.postImage, { width: IMAGE_WIDTH, height: POST_IMAGE_HEIGHT }]} resizeMode="contain" />
-    )}
-  </View>
-);
 const GroupDetail = () => {
+  const FORCE_DELETE_UI = false;
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const groupId = Number(params.id);
   const groupName = params.name || `Group ${params.id}`;
 
   const [posts, setPosts] = useState<any[]>([]);
   const [status, setStatus] = useState('');
+  const [userId, setUserId] = useState<number | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
   const [activeCommentPostId, setActiveCommentPostId] = useState<number | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
@@ -70,6 +46,21 @@ const GroupDetail = () => {
   useEffect(() => {
     load();
   }, [groupId]);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const stored = await SecureStore.getItemAsync('groupo_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setUserId(parsed?.id ?? null);
+        }
+      } catch {
+        setUserId(null);
+      }
+    };
+    loadUser();
+  }, []);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -146,6 +137,50 @@ const GroupDetail = () => {
     }
   };
 
+  const handleDeletePost = async (postId: number) => {
+    try {
+      await deletePost(postId);
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
+      setStatus(err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleDeleteComment = async (postId: number, commentId: number | string) => {
+    try {
+      await deleteComment(commentId);
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId ? { ...p, comments: (p.comments || []).filter((c: any) => c.id !== commentId) } : p
+        )
+      );
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        await handleLogout();
+        return;
+      }
+      setStatus(err.response?.data?.error || err.message);
+    }
+  };
+
+  const confirmDeletePost = (postId: number) => {
+    Alert.alert('Delete post?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeletePost(postId) },
+    ]);
+  };
+
+  const confirmDeleteComment = (postId: number, commentId: number | string) => {
+    Alert.alert('Delete comment?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteComment(postId, commentId) },
+    ]);
+  };
+
   const openCommentModal = (postId: number) => {
     setActiveCommentPostId(postId);
     setCommentDraft(commentInputs[postId] || '');
@@ -174,29 +209,23 @@ const GroupDetail = () => {
         data={posts}
         keyExtractor={(p) => p.id.toString()}
         renderItem={({ item }) => (
-          <View style={styles.postCard}>
-            <Text style={styles.postAuthor}>{item.user}</Text>
-            <Text>{item.content}</Text>
-            {item.image_urls?.length ? (
-              <ScrollView horizontal pagingEnabled style={styles.carousel}>
-                {item.image_urls.map((u: string, idx: number) => (
-                  <PostMedia key={idx} uri={resolveUrl(u)} />
-                ))}
-              </ScrollView>
-            ) : null}
-            <View style={styles.actionsRow}>
-              <Text style={styles.likeText}>Likes: {item.likes || 0}</Text>
-              <Button title="Like" onPress={() => handleLike(item.id)} />
-            </View>
-            {(item.comments || []).map((c: any) => (
-              <Text key={c.id} style={styles.commentLine}>
-                {c.user}: {c.content}
-              </Text>
-            ))}
-            <TouchableOpacity style={styles.commentRow} onPress={() => openCommentModal(item.id)}>
-              <Text style={styles.commentPlaceholder}>Add a comment…</Text>
-            </TouchableOpacity>
-          </View>
+          <PostCard
+            user={item.user}
+            groupName={item.group_name}
+            groupId={item.group_id}
+            content={item.content}
+            imageUrls={item.image_urls || []}
+            likes={item.likes || 0}
+            comments={item.comments || []}
+            resolveUrl={resolveUrl}
+            onLike={() => handleLike(item.id)}
+            onOpenComment={() => openCommentModal(item.id)}
+            onDeletePost={() => confirmDeletePost(item.id)}
+            onDeleteComment={(commentId) => confirmDeleteComment(item.id, commentId)}
+            currentUserId={userId ?? undefined}
+            postUserId={item.user_id}
+            forceDeleteUI={FORCE_DELETE_UI}
+          />
         )}
       />
       {status ? <Text style={styles.status}>{status}</Text> : null}
@@ -229,30 +258,8 @@ const GroupDetail = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
   title: { fontSize: 24, fontWeight: '700' },
-  postCard: { padding: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginVertical: 6, backgroundColor: '#fafafa' },
-  postAuthor: { fontWeight: '700', marginBottom: 4 },
-  postImageContainer: {
-    width: IMAGE_WIDTH,
-    marginTop: 8,
-    marginRight: 8,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  postImage: {
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  carousel: { marginTop: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   status: { marginTop: 8, color: '#c00' },
-  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
-  likeText: { fontWeight: '600' },
-  commentLine: { marginTop: 4, color: '#444' },
-  commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
-  commentPlaceholder: { color: '#666' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-start' },
   modalCard: { marginTop: 40, marginHorizontal: 16, backgroundColor: '#fff', borderRadius: 12, padding: 12, gap: 10 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

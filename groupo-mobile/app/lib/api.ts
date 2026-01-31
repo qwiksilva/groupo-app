@@ -74,7 +74,8 @@ export const createPostWithFiles = async (
     params?: Record<string, string>
   ) => {
     try {
-      const result = await FileSystem.uploadAsync(url, file.uri, {
+      const targetUrl = resolveUrl(url);
+      const result = await FileSystem.uploadAsync(targetUrl, file.uri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'file',
@@ -96,10 +97,16 @@ export const createPostWithFiles = async (
       console.error('[upload] uploadAsync exception', {
         message: err?.message,
         code: err?.code,
-        url,
+        url: targetUrl,
       });
       throw err;
     }
+  };
+
+  const isVideo = (file: { uri: string; mimeType?: string }) => {
+    if (file.mimeType?.startsWith('video/')) return true;
+    const ext = file.uri.split('?')[0].split('.').pop()?.toLowerCase();
+    return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
   };
 
   const normalizeImage = async (
@@ -124,10 +131,11 @@ export const createPostWithFiles = async (
   ) => {
     const normalized = await normalizeImage(file, profile);
     const data = await FileSystem.readAsStringAsync(normalized.uri, { encoding: FileSystem.EncodingType.Base64 });
-    const isVideo = (normalized.mimeType || file.mimeType || '').startsWith('video/');
-    const cap = isVideo ? VIDEO_BASE64_CAP : profile.cap;
+    const fileIsVideo = (normalized.mimeType || file.mimeType || '').startsWith('video/');
+    const cap = fileIsVideo ? VIDEO_BASE64_CAP : profile.cap;
     if (data.length > cap) {
-      throw new Error('Media too large to upload.');
+      const mb = Math.round(cap / 1_000_000);
+      throw new Error(`Media too large to upload (limit ~${mb}MB).`);
     }
     return {
       name: normalized.name || 'upload',
@@ -136,9 +144,9 @@ export const createPostWithFiles = async (
     };
   };
 
-  const HIGH_QUALITY = { width: 1280, compress: 0.7, cap: 170000 };
-  const LOW_QUALITY = { width: 700, compress: 0.45, cap: 200000 };
-  const VIDEO_BASE64_CAP = 8_000_000;
+  const HIGH_QUALITY = { width: 2048, compress: 0.9, cap: 700000 };
+  const LOW_QUALITY = { width: 700, compress: 0.45, cap: 250000 };
+  const VIDEO_BASE64_CAP = 25_000_000;
 
   const readAsBase64WithFallback = async (file: { uri: string; name?: string; mimeType?: string }) => {
     try {
@@ -199,17 +207,32 @@ export const createPostWithFiles = async (
   const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) =>
     await postJson(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
 
+  const uploadMultipartCreate = async (file: { uri: string; mimeType?: string }) =>
+    await uploadSingle(`/api/groups/${groupId}/posts`, file, { content });
+
+  const uploadMultipartMedia = async (postId: number, file: { uri: string; mimeType?: string }) =>
+    await uploadSingle(`/api/posts/${postId}/media`, file);
+
   if (files.length === 1) {
     const file = files[0];
+    if (isVideo(file)) {
+      const response = await uploadMultipartCreate(file);
+      return { response, uploadQuality: 'high' as const };
+    }
     const result = await uploadCreateWithRetry(file);
     return { response: result.response, uploadQuality: result.quality };
   }
 
   const [first, ...rest] = files;
-  const firstResult = await uploadCreateWithRetry(first);
-  const firstResp = firstResult.response;
-  if (firstResult.quality === 'low') {
-    usedLowQuality = true;
+  let firstResp: any;
+  if (isVideo(first)) {
+    firstResp = await uploadMultipartCreate(first);
+  } else {
+    const firstResult = await uploadCreateWithRetry(first);
+    firstResp = firstResult.response;
+    if (firstResult.quality === 'low') {
+      usedLowQuality = true;
+    }
   }
 
   const postId = firstResp?.post_id;
@@ -217,9 +240,13 @@ export const createPostWithFiles = async (
     throw new Error('Upload failed (missing post id)');
   }
   for (const file of rest) {
-    const quality = await uploadMediaWithRetry(postId, file);
-    if (quality === 'low') {
-      usedLowQuality = true;
+    if (isVideo(file)) {
+      await uploadMultipartMedia(postId, file);
+    } else {
+      const quality = await uploadMediaWithRetry(postId, file);
+      if (quality === 'low') {
+        usedLowQuality = true;
+      }
     }
   }
   return { response: firstResp, uploadQuality: usedLowQuality ? ('low' as const) : ('high' as const) };
@@ -257,6 +284,16 @@ export const likePost = async (postId: number) => {
 
 export const commentOnPost = async (postId: number, comment: string) => {
   const { data } = await api.post(`/api/posts/${postId}/comment`, { comment });
+  return data;
+};
+
+export const deletePost = async (postId: number) => {
+  const { data } = await api.delete(`/api/posts/${postId}`);
+  return data;
+};
+
+export const deleteComment = async (commentId: number | string) => {
+  const { data } = await api.delete(`/api/comments/${commentId}`);
   return data;
 };
 

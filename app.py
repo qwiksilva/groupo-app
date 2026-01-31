@@ -519,10 +519,11 @@ def api_group_posts(group_id):
             "content": p.content,
             "image_urls": _resolve_image_urls(p.image_urls),
             "user": p.user.username,
+            "user_id": p.user_id,
             "likes": p.likes,
             "group_id": group.id,
             "group_name": group.name,
-            "comments": [{"id": c.id, "content": c.content, "user": c.user.username} for c in p.comments]
+            "comments": [{"id": c.id, "content": c.content, "user": c.user.username, "user_id": c.user_id} for c in p.comments]
         } for p in posts]
     })
 
@@ -615,7 +616,29 @@ def api_comment_post(post_id):
     group = Group.query.get(post.group_id)
     if group:
         notify_group_members_comment(group, g.api_user, post, comment)
-    return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username}})
+    return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username, "user_id": g.api_user.id}})
+
+
+@app.route('/api/posts/<int:post_id>', methods=['DELETE'])
+@token_required
+def api_delete_post(post_id):
+    post = Post.query.get_or_404(post_id)
+    if post.user_id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+    db.session.delete(post)
+    db.session.commit()
+    return jsonify({"message": "Post deleted"})
+
+
+@app.route('/api/comments/<int:comment_id>', methods=['DELETE'])
+@token_required
+def api_delete_comment(comment_id):
+    comment = Comment.query.get_or_404(comment_id)
+    if comment.user_id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+    db.session.delete(comment)
+    db.session.commit()
+    return jsonify({"message": "Comment deleted", "comment_id": comment_id, "post_id": comment.post_id})
 
 
 @app.route('/api/posts/<int:post_id>/media', methods=['POST'])

@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
+import { PostCard } from '@/components/post-card';
 import {
   api,
   fetchGroups,
@@ -15,6 +16,7 @@ import {
 
 const TOKEN_KEY = 'groupo_auth_token';
 const MAX_MEDIA_PER_POST = 20;
+const MAX_VIDEO_SECONDS = 20;
 
 const extensionFromMime = (mime?: string) => {
   if (!mime) return null;
@@ -70,6 +72,7 @@ const PostScreen = () => {
   const [media, setMedia] = useState<any[]>([]);
   const [status, setStatus] = useState('');
   const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -128,6 +131,8 @@ const PostScreen = () => {
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
   const selectedLabel = selectedGroup?.name || (selectedGroupId ? `Group ${selectedGroupId}` : 'Select a group');
 
+  const previewUser = 'You';
+
   const pickMedia = async () => {
     const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (perm !== 'granted') {
@@ -151,6 +156,13 @@ const PostScreen = () => {
           uri: await resolveAssetUri(asset),
         }))
       );
+      const longVideos = normalizedAssets
+        .filter(({ asset }) => asset.type === 'video' && typeof asset.duration === 'number')
+        .filter(({ asset }) => (asset.duration || 0) / 1000 > MAX_VIDEO_SECONDS);
+      if (longVideos.length) {
+        setStatus(`Videos must be ${MAX_VIDEO_SECONDS}s or less. Please trim and try again.`);
+        return;
+      }
       console.log('[post] picked assets', result.assets.map((a) => ({ uri: a.uri, mimeType: a.mimeType, type: a.type, fileName: a.fileName })));
       const unresolved = normalizedAssets.find(({ uri }) => uri.startsWith('ph://') || uri.startsWith('assets-library://'));
       if (unresolved) {
@@ -180,7 +192,10 @@ const PostScreen = () => {
       setStatus('Select a group to post in.');
       return;
     }
-    if (!content.trim()) return;
+    if (!media.length) {
+      setStatus('Select at least one photo or video before posting.');
+      return;
+    }
     try {
       if (media.length) {
         const res = await createPostWithFiles(selectedGroupId, content, media);
@@ -231,12 +246,22 @@ const PostScreen = () => {
         />
         <View style={styles.buttonRow}>
           <Button title="Attach photo/video" onPress={pickMedia} />
-          <Button title="Post" onPress={handlePost} />
+          <Button
+            title="Preview"
+            onPress={() => {
+              if (!media.length) {
+                setStatus('Select at least one photo or video before previewing.');
+                return;
+              }
+              setShowPreview(true);
+            }}
+          />
         </View>
+        <Text style={styles.helper}>Videos should be {MAX_VIDEO_SECONDS}s or less and smaller file sizes upload faster.</Text>
         {media.length ? <Text style={styles.attachment}>{media.length} attachment(s) added (max {MAX_MEDIA_PER_POST})</Text> : null}
         {status ? <Text style={styles.status}>{status}</Text> : null}
 
-        <Modal visible={showGroupPicker} transparent animationType="slide">
+      <Modal visible={showGroupPicker} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Select Group</Text>
@@ -257,8 +282,31 @@ const PostScreen = () => {
               <Button title="Cancel" onPress={() => setShowGroupPicker(false)} />
             </View>
           </View>
-        </Modal>
-      </SafeAreaView>
+      </Modal>
+      <Modal visible={showPreview} animationType="slide">
+        <SafeAreaView style={styles.previewContainer}>
+          <View style={styles.previewHeader}>
+            <Text style={styles.previewTitle}>Preview</Text>
+            <Button title="Close" onPress={() => setShowPreview(false)} />
+          </View>
+          <ScrollView contentContainerStyle={styles.previewContent}>
+            <PostCard
+              user={previewUser}
+              groupName={selectedLabel}
+              content={content.trim() || 'No text yet.'}
+              imageUrls={media.map((m) => m.uri)}
+              likes={0}
+              comments={[]}
+              resolveUrl={(u) => u}
+              interactive={false}
+            />
+          </ScrollView>
+          <View style={styles.previewFooter}>
+            <Button title="Post" onPress={() => { setShowPreview(false); handlePost(); }} />
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </SafeAreaView>
     </TouchableWithoutFeedback>
   );
 };
@@ -269,6 +317,7 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8 },
   textarea: { minHeight: 100, textAlignVertical: 'top' },
   buttonRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  helper: { color: '#666', fontSize: 12 },
   attachment: { color: '#333' },
   status: { marginTop: 8, color: '#c00' },
   dropdown: {
@@ -287,6 +336,11 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700' },
   groupOption: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
   groupOptionText: { fontSize: 16 },
+  previewContainer: { flex: 1, backgroundColor: '#fff' },
+  previewHeader: { paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  previewTitle: { fontSize: 20, fontWeight: '700' },
+  previewContent: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
+  previewFooter: { paddingHorizontal: 16, paddingBottom: 16 },
 });
 
 export default PostScreen;
