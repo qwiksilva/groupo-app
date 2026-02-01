@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Button, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { Video, ResizeMode } from 'expo-av';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -141,6 +142,13 @@ export const PostCard = ({
     !!onDeletePost &&
     (forceDeleteUI || (!!currentUserId && !!postUserId && currentUserId === postUserId));
   const formattedPostTime = formatTimestamp(createdAt);
+  const [showPostMenu, setShowPostMenu] = React.useState(false);
+
+  const renderCommentDelete = (commentId: number | string) => (
+    <TouchableOpacity style={styles.swipeDelete} onPress={() => onDeleteComment?.(commentId)}>
+      <Text style={styles.swipeDeleteText}>Delete</Text>
+    </TouchableOpacity>
+  );
 
   return (
     <View style={styles.postCard}>
@@ -149,7 +157,29 @@ export const PostCard = ({
           {user}
           {displayGroup ? ` • ${displayGroup}` : ''}
         </Text>
-        {formattedPostTime ? <Text style={styles.postTime}>{formattedPostTime}</Text> : null}
+        <View style={styles.postMetaRight}>
+          {formattedPostTime ? <Text style={styles.postTime}>{formattedPostTime}</Text> : null}
+          {canDeletePost ? (
+            <View style={styles.menuWrapper}>
+              <TouchableOpacity style={styles.ellipsisButton} onPress={() => setShowPostMenu((prev) => !prev)}>
+                <Text style={styles.ellipsisText}>⋯</Text>
+              </TouchableOpacity>
+              {showPostMenu ? (
+                <View style={styles.menuPopover}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={() => {
+                      setShowPostMenu(false);
+                      onDeletePost?.();
+                    }}
+                  >
+                    <Text style={styles.menuItemDelete}>Delete post</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       </View>
       <Text>{content}</Text>
       {resolved.length ? (
@@ -163,25 +193,21 @@ export const PostCard = ({
         <Text style={styles.likeText}>Likes: {likes || 0}</Text>
         <View style={styles.actionsRight}>
           <Button title="Like" onPress={onLike} disabled={!interactive || !onLike} />
-          {canDeletePost ? (
-            <TouchableOpacity style={styles.deleteButton} onPress={onDeletePost}>
-              <Text style={styles.deleteText}>Delete</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
       </View>
       {comments.map((c, idx) => (
-        <View key={c.id ?? idx} style={styles.commentLine}>
-          <Text style={styles.commentText}>
-            {c.user}: {c.content}
-          </Text>
-          {c.created_at ? <Text style={styles.commentTime}>{formatTimestamp(c.created_at)}</Text> : null}
-          {interactive && onDeleteComment && (forceDeleteUI || (currentUserId && c.user_id === currentUserId)) ? (
-            <TouchableOpacity style={styles.commentDelete} onPress={() => onDeleteComment(c.id ?? idx)}>
-              <Text style={styles.commentDeleteText}>Delete</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <Swipeable
+          key={c.id ?? idx}
+          enabled={!!(interactive && onDeleteComment && (forceDeleteUI || (currentUserId && c.user_id === currentUserId)))}
+          renderRightActions={() => renderCommentDelete(c.id ?? idx)}
+        >
+          <View style={styles.commentLine}>
+            <Text style={styles.commentText}>
+              {c.user}: {c.content}
+            </Text>
+            {c.created_at ? <Text style={styles.commentTime}>{formatTimestamp(c.created_at)}</Text> : null}
+          </View>
+        </Swipeable>
       ))}
       <TouchableOpacity
         style={styles.commentRow}
@@ -196,8 +222,9 @@ export const PostCard = ({
 
 const styles = StyleSheet.create({
   postCard: { padding: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginVertical: 6, backgroundColor: '#fafafa' },
-  postMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 8 },
+  postMetaRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4, gap: 8 },
   postMeta: { fontWeight: '600', flex: 1 },
+  postMetaRight: { alignItems: 'flex-end', gap: 4 },
   postTime: { fontSize: 12, color: '#666' },
   postImageContainer: {
     width: CARD_WIDTH,
@@ -237,13 +264,33 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   actionsRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   likeText: { fontWeight: '600' },
-  deleteButton: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#e3b0b0' },
-  deleteText: { color: '#a00', fontWeight: '600', fontSize: 12 },
-  commentLine: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  menuWrapper: { position: 'relative' },
+  ellipsisButton: { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6 },
+  ellipsisText: { fontSize: 20, lineHeight: 20, color: '#444' },
+  menuPopover: {
+    position: 'absolute',
+    top: 28,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 8,
+    paddingVertical: 6,
+    minWidth: 120,
+    zIndex: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  menuItem: { paddingVertical: 8, paddingHorizontal: 12 },
+  menuItemDelete: { color: '#a00', fontWeight: '600' },
+  commentLine: { marginTop: 4, minHeight: 44, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   commentText: { color: '#444', flex: 1 },
   commentTime: { fontSize: 11, color: '#777' },
-  commentDelete: { paddingHorizontal: 6, paddingVertical: 4 },
-  commentDeleteText: { color: '#a00', fontSize: 12, fontWeight: '600' },
+  swipeDelete: { backgroundColor: '#a00', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, marginTop: 4, minHeight: 44 },
+  swipeDeleteText: { color: '#fff', fontWeight: '700' },
   commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
   commentPlaceholder: { color: '#666' },
 });

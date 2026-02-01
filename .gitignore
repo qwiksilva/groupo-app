@@ -1,0 +1,6 @@
+.env
+.idea/misc.xml
+__pycache__/
+extensions/__pycache__/
+instance/
+static/uploads/

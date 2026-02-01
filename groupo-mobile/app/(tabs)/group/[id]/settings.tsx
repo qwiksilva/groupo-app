@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { SafeAreaView, Text, TextInput, Button, StyleSheet, FlatList, View } from 'react-native';
+import { SafeAreaView, Text, TextInput, Button, StyleSheet, FlatList, View, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { updateGroup, addGroupMember, fetchGroupMembers } from '../../../lib/api';
 
@@ -28,6 +28,7 @@ const GroupSettings = () => {
 
   const saveName = async () => {
     try {
+      Keyboard.dismiss();
       await updateGroup(groupId, name);
       setStatus('Group name updated');
     } catch (err: any) {
@@ -38,6 +39,7 @@ const GroupSettings = () => {
   const addMember = async () => {
     if (!usernameToAdd) return;
     try {
+      Keyboard.dismiss();
       await addGroupMember(groupId, usernameToAdd);
       setStatus(`Added ${usernameToAdd}`);
       setUsernameToAdd('');
@@ -48,10 +50,18 @@ const GroupSettings = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Group settings</Text>
       <Text style={styles.label}>Name</Text>
-      <TextInput value={name} onChangeText={setName} style={styles.input} />
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        style={styles.input}
+        returnKeyType="done"
+        onSubmitEditing={saveName}
+        blurOnSubmit
+      />
       <Button title="Save" onPress={saveName} />
 
       <Text style={[styles.label, { marginTop: 16 }]}>Add member by username</Text>
@@ -61,6 +71,9 @@ const GroupSettings = () => {
         onChangeText={setUsernameToAdd}
         style={styles.input}
         autoCapitalize="none"
+        returnKeyType="done"
+        onSubmitEditing={addMember}
+        blurOnSubmit
       />
       <Button title="Add" onPress={addMember} />
 
@@ -77,14 +90,15 @@ const GroupSettings = () => {
       />
 
       {status ? <Text style={styles.status}>{status}</Text> : null}
-      <Button title="Back to group" onPress={() => router.back()} />
+      <Button title="Back to group" onPress={() => { Keyboard.dismiss(); router.back(); }} />
     </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
   label: { fontSize: 16, fontWeight: '600', marginTop: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   status: { marginTop: 8, color: '#c00' },

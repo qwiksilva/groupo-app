@@ -35,7 +35,7 @@ login_manager.login_view = 'login_page'
 
 def _ensure_timestamp_columns():
     inspector = inspect(db.engine)
-    for table in ("post", "comment"):
+    for table in ("user", "post", "comment"):
         cols = [c["name"] for c in inspector.get_columns(table)]
         if "created_at" not in cols:
             with db.engine.begin() as conn:
@@ -60,6 +60,7 @@ class User(db.Model, UserMixin):
     first_name = db.Column(db.String(100), nullable=False)
     last_name = db.Column(db.String(100), nullable=False)
     api_token = db.Column(db.String(128), unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -458,7 +459,7 @@ def api_register():
     )
     db.session.add(user)
     db.session.commit()
-    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username}})
+    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username, "first_name": user.first_name, "last_name": user.last_name, "created_at": user.created_at.isoformat() if user.created_at else None}})
 
 
 @app.route('/api/login', methods=['POST'])
@@ -470,7 +471,7 @@ def api_login():
     if not user.api_token:
         user.api_token = generate_api_token()
     db.session.commit()
-    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username}})
+    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username, "first_name": user.first_name, "last_name": user.last_name, "created_at": user.created_at.isoformat() if user.created_at else None}})
 
 
 @app.route('/api/push/register', methods=['POST'])

@@ -37,9 +37,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Home',
+          title: 'Latest Posts',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-          headerShown: false,
+          headerShown: true,
         }}
       />
       <Tabs.Screen
@@ -78,6 +78,13 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="group/[id]/settings"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
         options={{
           href: null,
           headerShown: false,

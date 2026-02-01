@@ -21,6 +21,7 @@ const MAPPING = {
   'plus': 'add',
   'plus.circle.fill': 'add-circle',
   'gearshape': 'settings',
+  'person.circle': 'person',
 } as IconMapping;
 
 /**

@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SafeAreaView, View, Text, TextInput, Button, FlatList, StyleSheet, Modal, KeyboardAvoidingView, Platform, TouchableOpacity, Alert } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import { PostCard } from '@/components/post-card';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   login,
   register,
@@ -22,6 +25,9 @@ const USER_KEY = 'groupo_user';
 const FORCE_DELETE_UI = false;
 
 const HomeScreen = () => {
+  const router = useRouter();
+  const navigation = useNavigation();
+  const colorScheme = useColorScheme();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [user, setUser] = useState<any>(null);
   const [token, setTokenState] = useState<string | null>(null);
@@ -52,22 +58,27 @@ const HomeScreen = () => {
     []
   );
 
-  useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
-        const storedUser = await SecureStore.getItemAsync(USER_KEY);
-        if (storedToken) {
-          setToken(storedToken);
-          setTokenState(storedToken);
-        }
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        }
-      } catch {
-        // ignore restore errors and continue unauthenticated
+  const restoreSession = async () => {
+    try {
+      const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+      const storedUser = await SecureStore.getItemAsync(USER_KEY);
+      if (storedToken) {
+        setToken(storedToken);
+        setTokenState(storedToken);
+      } else {
+        setToken(null);
+        setTokenState(null);
+        setUser(null);
       }
-    };
+      if (storedUser) {
+        setUser(JSON.parse(storedUser));
+      }
+    } catch {
+      // ignore restore errors and continue unauthenticated
+    }
+  };
+
+  useEffect(() => {
     restoreSession();
   }, []);
 
@@ -86,6 +97,7 @@ const HomeScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
+      restoreSession();
       if (token) {
         loadFeed();
       }
@@ -156,10 +168,24 @@ const HomeScreen = () => {
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      navigation.setOptions({
+        title: token ? 'Latest Posts' : 'Groupo',
+        headerRight: token
+          ? () => (
+              <TouchableOpacity onPress={() => router.push('/settings')} style={styles.headerButton}>
+                <IconSymbol size={20} name="person.circle" color={Colors[colorScheme ?? 'light'].tint} />
+              </TouchableOpacity>
+            )
+          : undefined,
+      });
+    }, [navigation, router, colorScheme, token])
+  );
+
   if (!token) {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={styles.title}>Groupo</Text>
         <View style={styles.toggleRow}>
           <Text style={[styles.toggle, authMode === 'login' && styles.activeToggle]} onPress={() => setAuthMode('login')}>
             Login
@@ -340,10 +366,6 @@ const HomeScreen = () => {
   };
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Latest posts</Text>
-        <Button title="Log out" onPress={() => handleLogout('Logged out.')} />
-      </View>
       <FlatList
         data={feed}
         keyExtractor={(p) => p.id.toString()}
@@ -397,8 +419,8 @@ const HomeScreen = () => {
 
   const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
+  headerButton: { paddingHorizontal: 8, paddingVertical: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   toggleRow: { flexDirection: 'row', gap: 12, marginBottom: 8 },
   toggle: { fontSize: 16, color: '#666' },

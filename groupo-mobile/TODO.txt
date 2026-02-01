@@ -14,8 +14,13 @@ Show users in a group - Done
 Allow media download to phone storage - Done
 allow higher/full quality uploads - Done
 Delete posts and comments - Done
-Remove user from group
-fix comments requireing two button clicks
-add loading screen after user hits post upload button to prevent repeat posts, and display group page after post uploads
-Display datetime on posts and comments
-Add user setting/info tab
+Remove user from group - Not needed now
+fix comments requireing two button clicks - Done
+add loading screen after user hits post upload button to prevent repeat posts, and display group page after post uploads - Done
+Display datetime on posts and comments - Done
+Add user setting/info tab - Done
+Remove keyboard from screen after adding user to group or changing group name - Done
+Settings page: change password and name, and delete account
+
+
+

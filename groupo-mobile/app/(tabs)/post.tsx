@@ -323,7 +323,7 @@ const PostScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8 },
   textarea: { minHeight: 100, textAlignVertical: 'top' },
   buttonRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },

@@ -204,7 +204,6 @@ const GroupDetail = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>{groupName}</Text>
       <FlatList
         data={posts}
         keyExtractor={(p) => p.id.toString()}
@@ -258,7 +257,7 @@ const GroupDetail = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
   status: { marginTop: 8, color: '#c00' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-start' },
