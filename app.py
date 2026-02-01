@@ -7,8 +7,10 @@ import os
 import secrets
 import requests
 import base64
+from datetime import datetime
 from uuid import uuid4
 from werkzeug.utils import secure_filename
+from sqlalchemy import inspect, text
 
 
 from extensions.uploads import save_files, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
@@ -31,9 +33,22 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login_page'
 
+def _ensure_timestamp_columns():
+    inspector = inspect(db.engine)
+    for table in ("post", "comment"):
+        cols = [c["name"] for c in inspector.get_columns(table)]
+        if "created_at" not in cols:
+            with db.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN created_at TIMESTAMP"))
+                conn.execute(text(f"UPDATE {table} SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+
 if os.environ.get('RENDER') == 'true':
     with app.app_context():
         db.create_all()
+        try:
+            _ensure_timestamp_columns()
+        except Exception as exc:
+            print(f"[startup] failed to ensure created_at columns: {exc}")
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -58,6 +73,7 @@ class Post(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), nullable=False)
     likes = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     comments = db.relationship('Comment', backref='post', cascade="all, delete-orphan")
     user = db.relationship('User')
 
@@ -66,6 +82,7 @@ class Comment(db.Model):
     content = db.Column(db.String(300), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     user = db.relationship('User')
 
 class GroupMembers(db.Model):
@@ -520,10 +537,17 @@ def api_group_posts(group_id):
             "image_urls": _resolve_image_urls(p.image_urls),
             "user": p.user.username,
             "user_id": p.user_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
             "likes": p.likes,
             "group_id": group.id,
             "group_name": group.name,
-            "comments": [{"id": c.id, "content": c.content, "user": c.user.username, "user_id": c.user_id} for c in p.comments]
+            "comments": [{
+                "id": c.id,
+                "content": c.content,
+                "user": c.user.username,
+                "user_id": c.user_id,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            } for c in p.comments]
         } for p in posts]
     })
 
@@ -616,7 +640,7 @@ def api_comment_post(post_id):
     group = Group.query.get(post.group_id)
     if group:
         notify_group_members_comment(group, g.api_user, post, comment)
-    return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username, "user_id": g.api_user.id}})
+    return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username, "user_id": g.api_user.id, "created_at": comment.created_at.isoformat() if comment.created_at else None}})
 
 
 @app.route('/api/posts/<int:post_id>', methods=['DELETE'])
@@ -682,7 +706,10 @@ def api_add_post_media_base64(post_id):
     return jsonify({"message": "Attached", "image_urls": _resolve_image_urls(post.image_urls)})
 
 if __name__ == '__main__':
-    if not os.path.exists('groupo.db'):
-        with app.app_context():
-            db.create_all()
+    with app.app_context():
+        db.create_all()
+        try:
+            _ensure_timestamp_columns()
+        except Exception as exc:
+            print(f"[startup] failed to ensure created_at columns: {exc}")
     app.run(debug=True)

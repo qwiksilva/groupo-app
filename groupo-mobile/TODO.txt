@@ -11,3 +11,11 @@ preview media selected for posting in posting screen - Done
 move "Send" button for comment to in text field, make arrow, to save space on screen - Done
 Change color of selected tab icon from white - Done
 Show users in a group - Done
+Allow media download to phone storage - Done
+allow higher/full quality uploads - Done
+Delete posts and comments - Done
+Remove user from group
+fix comments requireing two button clicks
+add loading screen after user hits post upload button to prevent repeat posts, and display group page after post uploads
+Display datetime on posts and comments
+Add user setting/info tab

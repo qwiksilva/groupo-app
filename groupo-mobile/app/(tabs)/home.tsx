@@ -252,8 +252,8 @@ const HomeScreen = () => {
     }
   };
 
-  const handleComment = async (postId: number) => {
-    const text = commentInputs[postId];
+  const handleComment = async (postId: number, overrideText?: string) => {
+    const text = (overrideText ?? commentInputs[postId])?.trim();
     if (!text) return;
     try {
       const res = await commentOnPost(postId, text);
@@ -335,7 +335,7 @@ const HomeScreen = () => {
     const text = commentDraft.trim();
     if (!text) return;
     setCommentInputs((prev) => ({ ...prev, [activeCommentPostId]: text }));
-    await handleComment(activeCommentPostId);
+    await handleComment(activeCommentPostId, text);
     closeCommentModal();
   };
   return (
@@ -356,6 +356,7 @@ const HomeScreen = () => {
             imageUrls={item.image_urls || []}
             likes={item.likes || 0}
             comments={item.comments || []}
+            createdAt={item.created_at}
             resolveUrl={resolveUrl}
             onLike={() => handleLike(item.id)}
             onOpenComment={() => openCommentModal(item.id)}

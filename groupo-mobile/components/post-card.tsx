@@ -12,6 +12,7 @@ type CommentItem = {
   user: string;
   user_id?: number;
   content: string;
+  created_at?: string | null;
 };
 
 type PostCardProps = {
@@ -31,11 +32,27 @@ type PostCardProps = {
   currentUserId?: number;
   postUserId?: number;
   forceDeleteUI?: boolean;
+  createdAt?: string | null;
 };
 
 const isVideoUrl = (uri: string) => {
   const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
   return ext ? ['mp4', 'mov', 'm4v', 'hevc', 'webm', 'ogg'].includes(ext) : false;
+};
+
+const formatTimestamp = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  return date.toLocaleDateString();
 };
 
 const PostMedia = ({ uri, interactive = true }: { uri: string; interactive?: boolean }) => {
@@ -115,6 +132,7 @@ export const PostCard = ({
   currentUserId,
   postUserId,
   forceDeleteUI = false,
+  createdAt,
 }: PostCardProps) => {
   const displayGroup = groupName || (groupId ? `Group #${groupId}` : '');
   const resolved = resolveUrl ? imageUrls.map((u) => resolveUrl(u)) : imageUrls;
@@ -122,13 +140,17 @@ export const PostCard = ({
     interactive &&
     !!onDeletePost &&
     (forceDeleteUI || (!!currentUserId && !!postUserId && currentUserId === postUserId));
+  const formattedPostTime = formatTimestamp(createdAt);
 
   return (
     <View style={styles.postCard}>
-      <Text style={styles.postMeta}>
-        {user}
-        {displayGroup ? ` • ${displayGroup}` : ''}
-      </Text>
+      <View style={styles.postMetaRow}>
+        <Text style={styles.postMeta}>
+          {user}
+          {displayGroup ? ` • ${displayGroup}` : ''}
+        </Text>
+        {formattedPostTime ? <Text style={styles.postTime}>{formattedPostTime}</Text> : null}
+      </View>
       <Text>{content}</Text>
       {resolved.length ? (
         <ScrollView horizontal pagingEnabled style={styles.carousel}>
@@ -153,6 +175,7 @@ export const PostCard = ({
           <Text style={styles.commentText}>
             {c.user}: {c.content}
           </Text>
+          {c.created_at ? <Text style={styles.commentTime}>{formatTimestamp(c.created_at)}</Text> : null}
           {interactive && onDeleteComment && (forceDeleteUI || (currentUserId && c.user_id === currentUserId)) ? (
             <TouchableOpacity style={styles.commentDelete} onPress={() => onDeleteComment(c.id ?? idx)}>
               <Text style={styles.commentDeleteText}>Delete</Text>
@@ -173,7 +196,9 @@ export const PostCard = ({
 
 const styles = StyleSheet.create({
   postCard: { padding: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginVertical: 6, backgroundColor: '#fafafa' },
-  postMeta: { fontWeight: '600', marginBottom: 4 },
+  postMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 8 },
+  postMeta: { fontWeight: '600', flex: 1 },
+  postTime: { fontSize: 12, color: '#666' },
   postImageContainer: {
     width: CARD_WIDTH,
     marginTop: 8,
@@ -216,6 +241,7 @@ const styles = StyleSheet.create({
   deleteText: { color: '#a00', fontWeight: '600', fontSize: 12 },
   commentLine: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   commentText: { color: '#444', flex: 1 },
+  commentTime: { fontSize: 11, color: '#777' },
   commentDelete: { paddingHorizontal: 6, paddingVertical: 4 },
   commentDeleteText: { color: '#a00', fontSize: 12, fontWeight: '600' },
   commentRow: { marginTop: 6, padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },

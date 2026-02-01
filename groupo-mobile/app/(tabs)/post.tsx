@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Modal, ScrollView, TouchableWithoutFeedback, Keyboard } from 'react-native';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -64,6 +64,7 @@ const resolveAssetUri = async (asset: ImagePicker.ImagePickerAsset) => {
 const PostScreen = () => {
   const params = useLocalSearchParams<{ groupId?: string }>();
   const presetGroupId = params.groupId ? Number(params.groupId) : null;
+  const router = useRouter();
 
   const [token, setTokenState] = useState<string | null>(null);
   const [groups, setGroups] = useState<any[]>([]);
@@ -73,6 +74,7 @@ const PostScreen = () => {
   const [status, setStatus] = useState('');
   const [showGroupPicker, setShowGroupPicker] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -188,6 +190,7 @@ const PostScreen = () => {
   };
 
   const handlePost = async () => {
+    if (isPosting) return;
     if (!selectedGroupId) {
       setStatus('Select a group to post in.');
       return;
@@ -197,6 +200,8 @@ const PostScreen = () => {
       return;
     }
     try {
+      setIsPosting(true);
+      setStatus('Uploading...');
       if (media.length) {
         const res = await createPostWithFiles(selectedGroupId, content, media);
         if (res.uploadQuality === 'low') {
@@ -210,12 +215,16 @@ const PostScreen = () => {
       }
       setContent('');
       setMedia([]);
+      setShowPreview(false);
+      router.replace({ pathname: `/group/${selectedGroupId}`, params: { name: selectedLabel } });
     } catch (err: any) {
       if (err.response?.status === 401) {
         setStatus('Session expired. Please log in again.');
         return;
       }
       setStatus(err.response?.data?.error || err.message);
+    } finally {
+      setIsPosting(false);
     }
   };
 
@@ -245,7 +254,7 @@ const PostScreen = () => {
           multiline
         />
         <View style={styles.buttonRow}>
-          <Button title="Attach photo/video" onPress={pickMedia} />
+          <Button title="Attach photo/video" onPress={pickMedia} disabled={isPosting} />
           <Button
             title="Preview"
             onPress={() => {
@@ -255,6 +264,7 @@ const PostScreen = () => {
               }
               setShowPreview(true);
             }}
+            disabled={isPosting}
           />
         </View>
         <Text style={styles.helper}>Videos should be {MAX_VIDEO_SECONDS}s or less and smaller file sizes upload faster.</Text>
@@ -302,7 +312,7 @@ const PostScreen = () => {
             />
           </ScrollView>
           <View style={styles.previewFooter}>
-            <Button title="Post" onPress={() => { setShowPreview(false); handlePost(); }} />
+            <Button title={isPosting ? 'Posting...' : 'Post'} onPress={handlePost} disabled={isPosting} />
           </View>
         </SafeAreaView>
       </Modal>
