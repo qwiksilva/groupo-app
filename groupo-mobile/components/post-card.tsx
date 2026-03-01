@@ -143,6 +143,10 @@ export const PostCard = ({
     (forceDeleteUI || (!!currentUserId && !!postUserId && currentUserId === postUserId));
   const formattedPostTime = formatTimestamp(createdAt);
   const [showPostMenu, setShowPostMenu] = React.useState(false);
+  const [activeMediaIndex, setActiveMediaIndex] = React.useState(0);
+  React.useEffect(() => {
+    setActiveMediaIndex(0);
+  }, [resolved.length]);
 
   const renderCommentDelete = (commentId: number | string) => (
     <TouchableOpacity style={styles.swipeDelete} onPress={() => onDeleteComment?.(commentId)}>
@@ -183,11 +187,30 @@ export const PostCard = ({
       </View>
       <Text>{content}</Text>
       {resolved.length ? (
-        <ScrollView horizontal pagingEnabled style={styles.carousel}>
+        <View>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            style={styles.carousel}
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const offsetX = event.nativeEvent.contentOffset.x;
+              const nextIndex = Math.round(offsetX / CARD_WIDTH);
+              setActiveMediaIndex(nextIndex);
+            }}
+          >
           {resolved.map((u, idx) => (
             <PostMedia key={idx} uri={u} interactive={interactive} />
           ))}
-        </ScrollView>
+          </ScrollView>
+          {resolved.length > 1 ? (
+            <View style={styles.dotsRow}>
+              {resolved.map((_, idx) => (
+                <View key={idx} style={[styles.dot, idx === activeMediaIndex && styles.dotActive]} />
+              ))}
+            </View>
+          ) : null}
+        </View>
       ) : null}
       <View style={styles.actionsRow}>
         <Text style={styles.likeText}>Likes: {likes || 0}</Text>
@@ -261,6 +284,9 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   carousel: { marginTop: 8 },
+  dotsRow: { marginTop: 6, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ccc' },
+  dotActive: { backgroundColor: '#444', width: 7, height: 7, borderRadius: 3.5 },
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   actionsRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   likeText: { fontWeight: '600' },

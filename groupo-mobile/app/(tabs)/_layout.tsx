@@ -50,8 +50,12 @@ export default function TabLayout() {
           headerShown: false,
           tabBarButton: (props) => (
             <Pressable
-              {...props}
               onPress={handlePostPress}
+              onLongPress={props.onLongPress}
+              accessibilityRole="button"
+              accessibilityState={props.accessibilityState}
+              accessibilityLabel={props.accessibilityLabel}
+              testID={props.testID}
               style={[styles.postButton, props.style]}
             >
               <View style={[styles.postButtonInner, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}>

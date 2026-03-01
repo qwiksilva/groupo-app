@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { SafeAreaView, View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Modal, ScrollView, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { SafeAreaView, View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Modal, ScrollView, TouchableWithoutFeedback, Keyboard, Image, Alert } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
@@ -134,6 +134,23 @@ const PostScreen = () => {
   const selectedLabel = selectedGroup?.name || (selectedGroupId ? `Group ${selectedGroupId}` : 'Select a group');
 
   const previewUser = 'You';
+  const clearDraft = () => {
+    setContent('');
+    setMedia([]);
+    setStatus('Draft cleared.');
+  };
+
+  const confirmClearDraft = () => {
+    if (!content.trim() && !media.length) return;
+    Alert.alert('Discard current post?', 'This removes selected media and text for this draft.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: clearDraft },
+    ]);
+  };
+
+  const removeMediaAtIndex = (index: number) => {
+    setMedia((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const pickMedia = async () => {
     const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -186,6 +203,7 @@ const PostScreen = () => {
       }));
       console.log('[post] upload files', files);
       setMedia(files);
+      setStatus('');
     }
   };
 
@@ -216,7 +234,7 @@ const PostScreen = () => {
       setContent('');
       setMedia([]);
       setShowPreview(false);
-      router.replace({ pathname: `/group/${selectedGroupId}`, params: { name: selectedLabel } });
+      router.replace({ pathname: '/group/[id]', params: { id: String(selectedGroupId), name: selectedLabel } });
     } catch (err: any) {
       if (err.response?.status === 401) {
         setStatus('Session expired. Please log in again.');
@@ -237,39 +255,61 @@ const PostScreen = () => {
   }
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView style={styles.container}>
-        <Text style={styles.title}>Create Post</Text>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.formContent}>
+          <Text style={styles.title}>Create Post</Text>
 
-        <TouchableOpacity style={styles.dropdown} onPress={() => setShowGroupPicker(true)}>
-          <Text style={styles.dropdownLabel}>{selectedLabel}</Text>
-          <Text style={styles.dropdownChevron}>▼</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.dropdown} onPress={() => setShowGroupPicker(true)}>
+            <Text style={styles.dropdownLabel}>{selectedLabel}</Text>
+            <Text style={styles.dropdownChevron}>▼</Text>
+          </TouchableOpacity>
 
-        <TextInput
-          placeholder="Write a post..."
-          style={[styles.input, styles.textarea]}
-          value={content}
-          onChangeText={setContent}
-          multiline
-        />
-        <View style={styles.buttonRow}>
-          <Button title="Attach photo/video" onPress={pickMedia} disabled={isPosting} />
-          <Button
-            title="Preview"
-            onPress={() => {
-              if (!media.length) {
-                setStatus('Select at least one photo or video before previewing.');
-                return;
-              }
-              setShowPreview(true);
-            }}
-            disabled={isPosting}
+          <TextInput
+            placeholder="Write a post..."
+            style={[styles.input, styles.textarea]}
+            value={content}
+            onChangeText={setContent}
+            multiline
+            autoCorrect
+            textAlignVertical="top"
+            returnKeyType="default"
           />
-        </View>
-        <Text style={styles.helper}>Videos should be {MAX_VIDEO_SECONDS}s or less and smaller file sizes upload faster.</Text>
-        {media.length ? <Text style={styles.attachment}>{media.length} attachment(s) added (max {MAX_MEDIA_PER_POST})</Text> : null}
-        {status ? <Text style={styles.status}>{status}</Text> : null}
+          <View style={styles.buttonRow}>
+            <Button title="Attach photo/video" onPress={pickMedia} disabled={isPosting} />
+            <Button
+              title="Preview"
+              onPress={() => {
+                if (!media.length) {
+                  setStatus('Select at least one photo or video before previewing.');
+                  return;
+                }
+                setShowPreview(true);
+              }}
+              disabled={isPosting}
+            />
+          </View>
+          {media.length ? (
+            <View style={styles.thumbnailSection}>
+              <Text style={styles.attachment}>{media.length} attachment(s) added (max {MAX_MEDIA_PER_POST})</Text>
+              <ScrollView style={styles.thumbnailScroll} contentContainerStyle={styles.thumbnailGrid}>
+                {media.map((m, index) => (
+                  <TouchableOpacity key={`${m.uri}-${index}`} style={styles.thumbWrap} onPress={() => removeMediaAtIndex(index)}>
+                    <Image source={{ uri: m.uri }} style={styles.thumbImage} resizeMode="cover" />
+                    <View style={styles.thumbBadge}>
+                      <Text style={styles.thumbBadgeText}>Remove</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          <Text style={styles.helper}>Videos should be {MAX_VIDEO_SECONDS}s or less and smaller file sizes upload faster.</Text>
+          <View style={styles.draftActions}>
+            <Button title="Discard current post" color="#a00" onPress={confirmClearDraft} disabled={isPosting} />
+          </View>
+          {status ? <Text style={styles.status}>{status}</Text> : null}
+        </ScrollView>
 
       <Modal visible={showGroupPicker} transparent animationType="slide">
           <View style={styles.modalOverlay}>
@@ -322,19 +362,28 @@ const PostScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
+  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  formContent: { gap: 12, paddingBottom: 24 },
   title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8 },
+  input: { borderWidth: 1, borderColor: '#d8d8d8', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, backgroundColor: '#fff' },
   textarea: { minHeight: 100, textAlignVertical: 'top' },
   buttonRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  draftActions: { marginTop: 2 },
   helper: { color: '#666', fontSize: 12 },
   attachment: { color: '#333' },
   status: { marginTop: 8, color: '#c00' },
+  thumbnailSection: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 10, gap: 8, maxHeight: 240 },
+  thumbnailScroll: { maxHeight: 190 },
+  thumbnailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  thumbWrap: { width: 94, height: 94, borderRadius: 8, overflow: 'hidden', backgroundColor: '#f0f0f0' },
+  thumbImage: { width: '100%', height: '100%' },
+  thumbBadge: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 2, alignItems: 'center' },
+  thumbBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   dropdown: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#d8d8d8',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

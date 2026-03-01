@@ -68,7 +68,7 @@ const GroupDetail = () => {
       title: groupName,
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => router.push({ pathname: `/group/${groupId}/settings`, params: { name: groupName } })}
+          onPress={() => router.push({ pathname: '/group/[id]/settings', params: { id: String(groupId), name: groupName } })}
           style={styles.headerButton}
         >
           <IconSymbol size={22} name="gearshape" color={Colors[colorScheme ?? 'light'].tint} />

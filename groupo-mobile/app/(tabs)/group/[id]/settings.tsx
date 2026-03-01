@@ -1,5 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { SafeAreaView, Text, TextInput, Button, StyleSheet, FlatList, View, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  SafeAreaView,
+  Text,
+  TextInput,
+  Button,
+  StyleSheet,
+  FlatList,
+  View,
+  Keyboard,
+  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { updateGroup, addGroupMember, fetchGroupMembers } from '../../../lib/api';
 
@@ -9,40 +21,47 @@ const GroupSettings = () => {
   const router = useRouter();
 
   const [name, setName] = useState(params.name || '');
-  const [usernameToAdd, setUsernameToAdd] = useState('');
+  const [memberLookup, setMemberLookup] = useState('');
   const [status, setStatus] = useState('');
   const [members, setMembers] = useState<any[]>([]);
 
-  const loadMembers = async () => {
+  const loadMembers = useCallback(async () => {
     try {
       const data = await fetchGroupMembers(groupId);
       setMembers(data || []);
     } catch (err: any) {
       setStatus(err.response?.data?.error || err.message);
     }
-  };
+  }, [groupId]);
 
   useEffect(() => {
     loadMembers();
-  }, [groupId]);
+  }, [loadMembers]);
 
   const saveName = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setStatus('Group name is required.');
+      return;
+    }
     try {
       Keyboard.dismiss();
-      await updateGroup(groupId, name);
-      setStatus('Group name updated');
+      const updated = await updateGroup(groupId, trimmed);
+      setName(updated?.name || trimmed);
+      setStatus('Group name updated for your account.');
     } catch (err: any) {
       setStatus(err.response?.data?.error || err.message);
     }
   };
 
   const addMember = async () => {
-    if (!usernameToAdd) return;
+    const lookup = memberLookup.trim();
+    if (!lookup) return;
     try {
       Keyboard.dismiss();
-      await addGroupMember(groupId, usernameToAdd);
-      setStatus(`Added ${usernameToAdd}`);
-      setUsernameToAdd('');
+      const added = await addGroupMember(groupId, lookup);
+      setStatus(`Added ${added?.username || lookup}`);
+      setMemberLookup('');
       loadMembers();
     } catch (err: any) {
       setStatus(err.response?.data?.error || err.message);
@@ -52,56 +71,81 @@ const GroupSettings = () => {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Group settings</Text>
-      <Text style={styles.label}>Name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        style={styles.input}
-        returnKeyType="done"
-        onSubmitEditing={saveName}
-        blurOnSubmit
-      />
-      <Button title="Save" onPress={saveName} />
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.content}>
+            <Text style={styles.title}>Group settings</Text>
 
-      <Text style={[styles.label, { marginTop: 16 }]}>Add member by username</Text>
-      <TextInput
-        placeholder="username"
-        value={usernameToAdd}
-        onChangeText={setUsernameToAdd}
-        style={styles.input}
-        autoCapitalize="none"
-        returnKeyType="done"
-        onSubmitEditing={addMember}
-        blurOnSubmit
-      />
-      <Button title="Add" onPress={addMember} />
+            <Text style={styles.label}>Display name (for you)</Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              style={styles.input}
+              placeholder="Group name"
+              returnKeyType="done"
+              onSubmitEditing={saveName}
+              autoCorrect={false}
+            />
+            <Button title="Save" onPress={saveName} />
 
-      <Text style={[styles.label, { marginTop: 20 }]}>Members</Text>
-      <FlatList
-        data={members}
-        keyExtractor={(m) => m.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.memberRow}>
-            <Text style={styles.memberName}>{item.username}</Text>
-            <Text style={styles.memberSub}>{item.first_name} {item.last_name}</Text>
+            <Text style={[styles.label, styles.addMemberLabel]}>Add member by username or phone</Text>
+            <TextInput
+              placeholder="username or phone number"
+              value={memberLookup}
+              onChangeText={setMemberLookup}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="none"
+              returnKeyType="done"
+              onSubmitEditing={addMember}
+            />
+            <Button title="Add" onPress={addMember} />
+
+            <Text style={[styles.label, styles.membersLabel]}>Members</Text>
+            <View style={styles.memberListWrap}>
+              <FlatList
+                data={members}
+                keyExtractor={(m) => m.id.toString()}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.memberListContent}
+                renderItem={({ item }) => (
+                  <View style={styles.memberRow}>
+                    <Text style={styles.memberName}>{item.username}</Text>
+                    <Text style={styles.memberSub}>{item.first_name} {item.last_name}</Text>
+                    {item.phone_number ? <Text style={styles.memberSub}>Phone: {item.phone_number}</Text> : null}
+                  </View>
+                )}
+              />
+            </View>
+
+            {status ? <Text style={styles.status}>{status}</Text> : null}
+            <Button title="Back to group" onPress={() => { Keyboard.dismiss(); router.back(); }} />
           </View>
-        )}
-      />
-
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-      <Button title="Back to group" onPress={() => { Keyboard.dismiss(); router.back(); }} />
-    </SafeAreaView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, gap: 12, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
-  label: { fontSize: 16, fontWeight: '600', marginTop: 8 },
-  input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 8, marginVertical: 6 },
-  status: { marginTop: 8, color: '#c00' },
+  container: { flex: 1, backgroundColor: '#fff' },
+  flex: { flex: 1 },
+  content: { flex: 1, padding: 16, gap: 10 },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 4 },
+  label: { fontSize: 16, fontWeight: '600' },
+  addMemberLabel: { marginTop: 10 },
+  membersLabel: { marginTop: 10 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#d8d8d8',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+  },
+  memberListWrap: { flex: 1, minHeight: 180, borderWidth: 1, borderColor: '#eee', borderRadius: 10 },
+  memberListContent: { paddingHorizontal: 12, paddingVertical: 4 },
+  status: { marginTop: 2, color: '#c00' },
   memberRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
   memberName: { fontSize: 16, fontWeight: '600' },
   memberSub: { color: '#666' },

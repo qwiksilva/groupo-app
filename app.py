@@ -10,7 +10,7 @@ import base64
 from datetime import datetime
 from uuid import uuid4
 from werkzeug.utils import secure_filename
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, or_
 
 
 from extensions.uploads import save_files, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
@@ -33,7 +33,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login_page'
 
-def _ensure_timestamp_columns():
+def _ensure_schema_columns():
     inspector = inspect(db.engine)
     for table in ("user", "post", "comment"):
         cols = [c["name"] for c in inspector.get_columns(table)]
@@ -41,14 +41,18 @@ def _ensure_timestamp_columns():
             with db.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN created_at TIMESTAMP"))
                 conn.execute(text(f"UPDATE {table} SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    user_cols = [c["name"] for c in inspector.get_columns("user")]
+    if "phone_number" not in user_cols:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE user ADD COLUMN phone_number VARCHAR(20)"))
 
 if os.environ.get('RENDER') == 'true':
     with app.app_context():
         db.create_all()
         try:
-            _ensure_timestamp_columns()
+            _ensure_schema_columns()
         except Exception as exc:
-            print(f"[startup] failed to ensure created_at columns: {exc}")
+            print(f"[startup] failed to ensure schema columns: {exc}")
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -59,6 +63,7 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(200), nullable=False)
     first_name = db.Column(db.String(100), nullable=False)
     last_name = db.Column(db.String(100), nullable=False)
+    phone_number = db.Column(db.String(20), unique=True)
     api_token = db.Column(db.String(128), unique=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -90,6 +95,12 @@ class GroupMembers(db.Model):
     __tablename__ = 'group_members'
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), primary_key=True)
+
+class GroupNameAlias(db.Model):
+    __tablename__ = 'group_name_alias'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'), primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
 
 friends = db.Table('friends',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id')),
@@ -196,6 +207,31 @@ def _resolve_image_urls(image_urls):
             print(f"[upload] presign failed, returning raw keys: {exc}")
             return urls
     return urls
+
+
+def _normalize_phone_number(value):
+    if not value:
+        return None
+    digits = ''.join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) < 10:
+        return None
+    return digits
+
+
+def _public_user_payload(user: User):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone_number": user.phone_number,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+def _group_name_for_user(group: Group, user: User):
+    alias = GroupNameAlias.query.filter_by(group_id=group.id, user_id=user.id).first()
+    return alias.name if alias and alias.name else group.name
 
 class DeviceToken(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -441,6 +477,30 @@ def notify_group_members_comment(group: Group, actor: User, post: Post, comment:
             print(f"[notify] error token={t.token} exc={exc}")
 
 
+def notify_post_owner_like(actor: User, post: Post):
+    if not post.user_id or post.user_id == actor.id:
+        return
+    tokens = DeviceToken.query.filter_by(user_id=post.user_id).all()
+    if not tokens:
+        return
+    group = Group.query.get(post.group_id)
+    group_name = group.name if group else "your group"
+    expo_endpoint = os.environ.get("EXPO_PUSH_URL", "https://exp.host/--/api/v2/push/send")
+    for t in tokens:
+        payload = {
+            "to": t.token,
+            "title": "New like",
+            "body": f"{actor.username} liked your post in {group_name}",
+            "data": {"group_id": post.group_id, "post_id": post.id, "type": "like"},
+        }
+        try:
+            resp = requests.post(expo_endpoint, json=payload, timeout=5)
+            if resp.status_code != 200:
+                print(f"[notify] failed status={resp.status_code} token={t.token} body={resp.text}")
+        except Exception as exc:
+            print(f"[notify] error token={t.token} exc={exc}")
+
+
 @app.route('/api/register', methods=['POST'])
 def api_register():
     data = request.get_json() or {}
@@ -449,17 +509,23 @@ def api_register():
         return jsonify({"error": "Missing fields"}), 400
     if User.query.filter_by(username=data['username']).first():
         return jsonify({"error": "Username taken"}), 400
+    phone_number = _normalize_phone_number(data.get('phone_number'))
+    if data.get('phone_number') and not phone_number:
+        return jsonify({"error": "Phone number must include at least 10 digits"}), 400
+    if phone_number and User.query.filter_by(phone_number=phone_number).first():
+        return jsonify({"error": "Phone number already in use"}), 400
     hashed_pw = bcrypt.generate_password_hash(data['password']).decode('utf-8')
     user = User(
         username=data['username'],
         password=hashed_pw,
         first_name=data['first_name'],
         last_name=data['last_name'],
+        phone_number=phone_number,
         api_token=generate_api_token()
     )
     db.session.add(user)
     db.session.commit()
-    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username, "first_name": user.first_name, "last_name": user.last_name, "created_at": user.created_at.isoformat() if user.created_at else None}})
+    return jsonify({"token": user.api_token, "user": _public_user_payload(user)})
 
 
 @app.route('/api/login', methods=['POST'])
@@ -471,7 +537,65 @@ def api_login():
     if not user.api_token:
         user.api_token = generate_api_token()
     db.session.commit()
-    return jsonify({"token": user.api_token, "user": {"id": user.id, "username": user.username, "first_name": user.first_name, "last_name": user.last_name, "created_at": user.created_at.isoformat() if user.created_at else None}})
+    return jsonify({"token": user.api_token, "user": _public_user_payload(user)})
+
+
+@app.route('/api/me', methods=['GET', 'PATCH', 'DELETE'])
+@token_required
+def api_me():
+    if request.method == 'GET':
+        return jsonify({"user": _public_user_payload(g.api_user)})
+
+    if request.method == 'DELETE':
+        user = g.api_user
+        Comment.query.filter_by(user_id=user.id).delete()
+        Post.query.filter_by(user_id=user.id).delete()
+        GroupMembers.query.filter_by(user_id=user.id).delete()
+        DeviceToken.query.filter_by(user_id=user.id).delete()
+        GroupNameAlias.query.filter_by(user_id=user.id).delete()
+        db.session.execute(text("DELETE FROM friends WHERE user_id = :uid OR friend_id = :uid"), {"uid": user.id})
+        db.session.delete(user)
+        db.session.commit()
+        return jsonify({"message": "Account deleted"})
+
+    data = request.get_json() or {}
+    first_name = (data.get('first_name') or '').strip()
+    last_name = (data.get('last_name') or '').strip()
+    phone_number_raw = data.get('phone_number')
+    if first_name:
+        g.api_user.first_name = first_name
+    if last_name:
+        g.api_user.last_name = last_name
+    if phone_number_raw is not None:
+        if str(phone_number_raw).strip() == '':
+            g.api_user.phone_number = None
+        else:
+            phone_number = _normalize_phone_number(phone_number_raw)
+            if not phone_number:
+                return jsonify({"error": "Phone number must include at least 10 digits"}), 400
+            existing = User.query.filter(User.phone_number == phone_number, User.id != g.api_user.id).first()
+            if existing:
+                return jsonify({"error": "Phone number already in use"}), 400
+            g.api_user.phone_number = phone_number
+    db.session.commit()
+    return jsonify({"user": _public_user_payload(g.api_user)})
+
+
+@app.route('/api/me/password', methods=['POST'])
+@token_required
+def api_change_password():
+    data = request.get_json() or {}
+    current_password = data.get('current_password') or ''
+    new_password = data.get('new_password') or ''
+    if not current_password or not new_password:
+        return jsonify({"error": "Current and new password are required"}), 400
+    if len(new_password) < 8:
+        return jsonify({"error": "New password must be at least 8 characters"}), 400
+    if not bcrypt.check_password_hash(g.api_user.password, current_password):
+        return jsonify({"error": "Current password is incorrect"}), 400
+    g.api_user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    db.session.commit()
+    return jsonify({"message": "Password updated"})
 
 
 @app.route('/api/push/register', methods=['POST'])
@@ -502,9 +626,9 @@ def api_groups():
         group.members.append(g.api_user)
         db.session.add(group)
         db.session.commit()
-        return jsonify({"id": group.id, "name": group.name})
+        return jsonify({"id": group.id, "name": _group_name_for_user(group, g.api_user)})
 
-    groups = [{"id": grp.id, "name": grp.name} for grp in g.api_user.groups]
+    groups = [{"id": grp.id, "name": _group_name_for_user(grp, g.api_user)} for grp in g.api_user.groups]
     return jsonify({"groups": groups})
 
 
@@ -530,8 +654,9 @@ def api_group_posts(group_id):
         return jsonify({"message": "Created", "post_id": post.id})
 
     posts = Post.query.filter_by(group_id=group.id).order_by(Post.id.desc()).all()
+    viewer_group_name = _group_name_for_user(group, g.api_user)
     return jsonify({
-        "group": {"id": group.id, "name": group.name},
+        "group": {"id": group.id, "name": viewer_group_name},
         "posts": [{
             "id": p.id,
             "content": p.content,
@@ -541,7 +666,7 @@ def api_group_posts(group_id):
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "likes": p.likes,
             "group_id": group.id,
-            "group_name": group.name,
+            "group_name": viewer_group_name,
             "comments": [{
                 "id": c.id,
                 "content": c.content,
@@ -585,11 +710,17 @@ def api_update_group(group_id):
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
     data = request.get_json() or {}
-    new_name = data.get('name')
-    if new_name:
-        group.name = new_name
-        db.session.commit()
-    return jsonify({"group": {"id": group.id, "name": group.name}})
+    new_name = (data.get('name') or '').strip()
+    if not new_name:
+        return jsonify({"error": "Name required"}), 400
+    alias = GroupNameAlias.query.filter_by(group_id=group.id, user_id=g.api_user.id).first()
+    if not alias:
+        alias = GroupNameAlias(group_id=group.id, user_id=g.api_user.id, name=new_name)
+        db.session.add(alias)
+    else:
+        alias.name = new_name
+    db.session.commit()
+    return jsonify({"group": {"id": group.id, "name": _group_name_for_user(group, g.api_user)}})
 
 
 @app.route('/api/groups/<int:group_id>/members', methods=['GET', 'POST'])
@@ -604,19 +735,26 @@ def api_add_group_member_api(group_id):
             "username": m.username,
             "first_name": m.first_name,
             "last_name": m.last_name,
+            "phone_number": m.phone_number,
         } for m in group.members]
         return jsonify({"members": members})
     data = request.get_json() or {}
-    username = data.get('username')
-    if not username:
-        return jsonify({"error": "Username required"}), 400
-    user = User.query.filter_by(username=username).first()
+    username = (data.get('username') or '').strip()
+    phone_number = _normalize_phone_number(data.get('phone_number'))
+    if not username and not phone_number:
+        return jsonify({"error": "Username or phone number required"}), 400
+    filters = []
+    if username:
+        filters.append(User.username == username)
+    if phone_number:
+        filters.append(User.phone_number == phone_number)
+    user = User.query.filter(or_(*filters)).first()
     if not user:
         return jsonify({"error": "User not found"}), 404
     if user not in group.members:
         group.members.append(user)
         db.session.commit()
-    return jsonify({"message": "User added", "user": {"id": user.id, "username": user.username}})
+    return jsonify({"message": "User added", "user": {"id": user.id, "username": user.username, "phone_number": user.phone_number}})
 
 
 @app.route('/api/posts/<int:post_id>/like', methods=['POST'])
@@ -625,6 +763,7 @@ def api_like_post(post_id):
     post = Post.query.get_or_404(post_id)
     post.likes += 1
     db.session.commit()
+    notify_post_owner_like(g.api_user, post)
     return jsonify({"likes": post.likes})
 
 
@@ -710,7 +849,7 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         try:
-            _ensure_timestamp_columns()
+            _ensure_schema_columns()
         except Exception as exc:
-            print(f"[startup] failed to ensure created_at columns: {exc}")
+            print(f"[startup] failed to ensure schema columns: {exc}")
     app.run(debug=True)

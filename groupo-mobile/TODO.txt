@@ -1,10 +1,10 @@
+Small features/bug fixes
 Photos get cut off vertically - Done
 Stay logged in - Done
 Save creds to phone - Done
 can only post 5 photos at a time - Done
 create post button in middle that brings to a posting page- drop down to select group to post in, autoselected if pressed while viewing a group - Done
 Move setting button in group to top right nav bar - Done
-notifications on likes and comments
 video posts not working correctly - Done
 post text gets hidden when trying to type - bring to own positn gpage and move text to top to deconflict with keyboard - Done
 preview media selected for posting in posting screen - Done
@@ -14,13 +14,32 @@ Show users in a group - Done
 Allow media download to phone storage - Done
 allow higher/full quality uploads - Done
 Delete posts and comments - Done
-Remove user from group - Not needed now
 fix comments requireing two button clicks - Done
 add loading screen after user hits post upload button to prevent repeat posts, and display group page after post uploads - Done
 Display datetime on posts and comments - Done
 Add user setting/info tab - Done
 Remove keyboard from screen after adding user to group or changing group name - Done
-Settings page: change password and name, and delete account
+Notifications stopped working - Done
+Settings page: change password and name, and delete account - Done
+Add dots below photo in post to indicate horizonatal scrolling and which image is being viewed - Done
+Add member by phone number to group - Done
+Make list of members in group setting page scrollable - Done
+In post page, show thumbnails of which photos have been selected in a grid, and make it scrollable if needed. Add ability to unselect photos via the thumnail - Done
+In post page, add ability to delete current post - Done
+When a user changes a group name in the group setting page, make it so that it only changes for that user. - Done
+Add member text box in group setting page gets cut off by keyboard, can't see what is being typed - Done
+Ensure all text boxes in app use best-practice UI/UX design - Done
+Add notifications on likes and comments - Done
 
+Major updates
+Create new first-class type for albums in addition to groups. 
+Only owner can change album name
 
+Potential future updates
+add ability to save draft as post and add page to view/resume drafts
+integrate with contacts
+Ability to add friends and page to view friends, and make groups/albums with them
+Remove user from group - Not needed for now
+Delete post
+limit likes to 1 per post
 

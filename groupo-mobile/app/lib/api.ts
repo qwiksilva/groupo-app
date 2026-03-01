@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 
@@ -30,6 +31,29 @@ export const login = async (username: string, password: string) => {
 export const register = async (payload: { username: string; password: string; first_name: string; last_name: string }) => {
   const { data } = await api.post('/api/register', payload);
   setToken(data.token);
+  return data;
+};
+
+export const fetchMe = async () => {
+  const { data } = await api.get('/api/me');
+  return data.user;
+};
+
+export const updateMe = async (payload: { first_name?: string; last_name?: string; phone_number?: string | null }) => {
+  const { data } = await api.patch('/api/me', payload);
+  return data.user;
+};
+
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+  const { data } = await api.post('/api/me/password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  return data;
+};
+
+export const deleteAccount = async () => {
+  const { data } = await api.delete('/api/me');
   return data;
 };
 
@@ -73,8 +97,8 @@ export const createPostWithFiles = async (
     file: { uri: string; mimeType?: string },
     params?: Record<string, string>
   ) => {
+    const targetUrl = resolveUrl(url);
     try {
-      const targetUrl = resolveUrl(url);
       const result = await FileSystem.uploadAsync(targetUrl, file.uri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
@@ -258,8 +282,22 @@ export const createGroup = async (name: string) => {
 };
 
 export const registerPushToken = async () => {
-  const { status } = await Notifications.requestPermissionsAsync();
-  if (status !== 'granted') throw new Error('Push permission denied');
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#3A7DFF',
+    });
+  }
+
+  const permission = await Notifications.getPermissionsAsync();
+  let finalStatus = permission.status;
+  if (finalStatus !== 'granted') {
+    const req = await Notifications.requestPermissionsAsync();
+    finalStatus = req.status;
+  }
+  if (finalStatus !== 'granted') throw new Error('Push permission denied');
 
   const projectId =
     Constants?.expoConfig?.extra?.eas?.projectId ||
@@ -303,6 +341,12 @@ export const updateGroup = async (groupId: number, name: string) => {
 };
 
 export const addGroupMember = async (groupId: number, username: string) => {
-  const { data } = await api.post(`/api/groups/${groupId}/members`, { username });
+  const trimmed = username.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  const payload =
+    digits.length >= 10
+      ? { phone_number: digits }
+      : { username: trimmed };
+  const { data } = await api.post(`/api/groups/${groupId}/members`, payload);
   return data.user;
 };
