@@ -2,14 +2,14 @@
   "expo": {
     "name": "groupo-mobile",
     "slug": "groupo-mobile",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "groupomobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "buildNumber": "5",
+      "buildNumber": "6",
       "supportsTablet": true,
       "bundleIdentifier": "com.rcompany.groupo",
       "infoPlist": {
