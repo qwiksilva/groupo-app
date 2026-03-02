@@ -49,7 +49,8 @@ def _ensure_schema_columns():
     if "kind" not in group_cols:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN kind VARCHAR(20) DEFAULT 'group'"))
-            conn.execute(text("UPDATE \"group\" SET kind = 'group' WHERE kind IS NULL"))
+    with db.engine.begin() as conn:
+        conn.execute(text("UPDATE \"group\" SET kind = 'group' WHERE kind IS NULL OR kind = ''"))
     if "owner_id" not in group_cols:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN owner_id INTEGER"))
@@ -57,13 +58,12 @@ def _ensure_schema_columns():
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN parent_group_id INTEGER"))
 
-if os.environ.get('RENDER') == 'true':
-    with app.app_context():
-        db.create_all()
-        try:
-            _ensure_schema_columns()
-        except Exception as exc:
-            print(f"[startup] failed to ensure schema columns: {exc}")
+with app.app_context():
+    db.create_all()
+    try:
+        _ensure_schema_columns()
+    except Exception as exc:
+        print(f"[startup] failed to ensure schema columns: {exc}")
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -793,7 +793,7 @@ def api_groups():
         db.session.commit()
         return jsonify({"id": group.id, "name": _group_name_for_user(group, g.api_user)})
 
-    groups = [{"id": grp.id, "name": _group_name_for_user(grp, g.api_user)} for grp in g.api_user.groups if grp.kind != 'album']
+    groups = [{"id": grp.id, "name": _group_name_for_user(grp, g.api_user)} for grp in g.api_user.groups if grp.kind != 'album' or grp.kind is None]
     return jsonify({"groups": groups})
 
 
