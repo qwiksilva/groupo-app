@@ -619,11 +619,19 @@ def api_register_push():
     platform = data.get('platform', 'ios')
     if not token:
         return jsonify({"error": "Missing token"}), 400
-    existing = DeviceToken.query.filter_by(user_id=g.api_user.id, token=token).first()
-    if not existing:
+    # Keep each physical push token bound to exactly one user at a time.
+    # This prevents cross-account notifications when testing multiple accounts on one device.
+    existing_for_token = DeviceToken.query.filter_by(token=token).all()
+    if not existing_for_token:
         dt = DeviceToken(user_id=g.api_user.id, token=token, platform=platform)
         db.session.add(dt)
-        db.session.commit()
+    else:
+        primary = existing_for_token[0]
+        primary.user_id = g.api_user.id
+        primary.platform = platform
+        for duplicate in existing_for_token[1:]:
+            db.session.delete(duplicate)
+    db.session.commit()
     return jsonify({"message": "Registered push token"})
 
 
