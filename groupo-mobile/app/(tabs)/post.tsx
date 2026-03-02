@@ -10,7 +10,7 @@ import {
   api,
   fetchGroups,
   fetchAlbums,
-  createPost,
+  fetchGroupAlbums,
   createAlbumPost,
   createPostWithFiles,
   setToken,
@@ -73,6 +73,8 @@ const PostScreen = () => {
   const [token, setTokenState] = useState<string | null>(null);
   const [groups, setGroups] = useState<any[]>([]);
   const [albums, setAlbums] = useState<any[]>([]);
+  const [groupAlbums, setGroupAlbums] = useState<any[]>([]);
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState<number[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<{ type: 'group' | 'album'; id: number } | null>(null);
   const [content, setContent] = useState('');
   const [media, setMedia] = useState<any[]>([]);
@@ -175,6 +177,30 @@ const PostScreen = () => {
     setMedia((prev) => prev.filter((_, i) => i !== index));
   };
 
+  useEffect(() => {
+    const loadGroupAlbums = async () => {
+      if (!selectedTarget || selectedTarget.type !== 'group') {
+        setGroupAlbums([]);
+        setSelectedAlbumIds([]);
+        return;
+      }
+      try {
+        const data = await fetchGroupAlbums(selectedTarget.id);
+        setGroupAlbums(data || []);
+      } catch {
+        setGroupAlbums([]);
+      }
+      setSelectedAlbumIds([]);
+    };
+    loadGroupAlbums();
+  }, [selectedTarget]);
+
+  const toggleAlbumSelection = (albumId: number) => {
+    setSelectedAlbumIds((prev) =>
+      prev.includes(albumId) ? prev.filter((id) => id !== albumId) : [...prev, albumId]
+    );
+  };
+
   const pickMedia = async () => {
     const { status: perm } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (perm !== 'granted') {
@@ -240,22 +266,29 @@ const PostScreen = () => {
       setStatus('Select at least one photo or video before posting.');
       return;
     }
+    const postingAlbumIds =
+      selectedTarget.type === 'group'
+        ? selectedAlbumIds
+        : selectedTarget.type === 'album'
+          ? [selectedTarget.id]
+          : [];
+    if (!postingAlbumIds.length) {
+      setStatus('Select at least one album before posting.');
+      return;
+    }
     try {
       setIsPosting(true);
       setStatus('Uploading...');
+      const primaryAlbumId = postingAlbumIds[0];
       if (media.length) {
-        const res = await createPostWithFiles(selectedTarget.id, content, media, selectedTarget.type);
+        const res = await createPostWithFiles(primaryAlbumId, content, media, 'album', postingAlbumIds);
         if (res.uploadQuality === 'low') {
           setStatus('Uploaded in lower quality due to size.');
         } else {
           setStatus('Posted.');
         }
       } else {
-        if (selectedTarget.type === 'album') {
-          await createAlbumPost(selectedTarget.id, content);
-        } else {
-          await createPost(selectedTarget.id, content);
-        }
+        await createAlbumPost(primaryAlbumId, content, postingAlbumIds);
         setStatus('Posted.');
       }
       setContent('');
@@ -320,6 +353,29 @@ const PostScreen = () => {
               disabled={isPosting}
             />
           </View>
+          {selectedTarget?.type === 'group' ? (
+            <View style={styles.albumPickerWrap}>
+              <Text style={styles.albumPickerTitle}>Select album(s) for this post</Text>
+              {groupAlbums.length ? (
+                <View style={styles.albumChipRow}>
+                  {groupAlbums.map((album) => {
+                    const selected = selectedAlbumIds.includes(album.id);
+                    return (
+                      <TouchableOpacity
+                        key={album.id}
+                        style={[styles.albumChip, selected && styles.albumChipSelected]}
+                        onPress={() => toggleAlbumSelection(album.id)}
+                      >
+                        <Text style={[styles.albumChipText, selected && styles.albumChipTextSelected]}>{album.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={styles.helper}>No albums found in this group. Create one from the group page first.</Text>
+              )}
+            </View>
+          ) : null}
           {media.length ? (
             <View style={styles.thumbnailSection}>
               <Text style={styles.attachment}>{media.length} attachment(s) added (max {MAX_MEDIA_PER_POST})</Text>
@@ -401,6 +457,13 @@ const styles = StyleSheet.create({
   buttonRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   draftActions: { marginTop: 2 },
   helper: { color: '#666', fontSize: 12 },
+  albumPickerWrap: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 10, gap: 8 },
+  albumPickerTitle: { fontWeight: '600', color: '#333' },
+  albumChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  albumChip: { borderWidth: 1, borderColor: '#ddd', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#fff' },
+  albumChipSelected: { backgroundColor: '#222', borderColor: '#222' },
+  albumChipText: { color: '#333', fontSize: 13 },
+  albumChipTextSelected: { color: '#fff' },
   attachment: { color: '#333' },
   status: { marginTop: 8, color: '#c00' },
   thumbnailSection: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 10, gap: 8, maxHeight: 240 },

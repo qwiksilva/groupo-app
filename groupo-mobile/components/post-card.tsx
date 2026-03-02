@@ -34,6 +34,8 @@ type PostCardProps = {
   postUserId?: number;
   forceDeleteUI?: boolean;
   createdAt?: string | null;
+  associatedAlbums?: { id: number; name: string }[];
+  onOpenAssociatedAlbum?: (albumId: number, albumName: string) => void;
 };
 
 const isVideoUrl = (uri: string) => {
@@ -134,6 +136,8 @@ export const PostCard = ({
   postUserId,
   forceDeleteUI = false,
   createdAt,
+  associatedAlbums = [],
+  onOpenAssociatedAlbum,
 }: PostCardProps) => {
   const displayGroup = groupName || (groupId ? `Group #${groupId}` : '');
   const resolved = resolveUrl ? imageUrls.map((u) => resolveUrl(u)) : imageUrls;
@@ -144,6 +148,7 @@ export const PostCard = ({
   const formattedPostTime = formatTimestamp(createdAt);
   const [showPostMenu, setShowPostMenu] = React.useState(false);
   const [activeMediaIndex, setActiveMediaIndex] = React.useState(0);
+  const [showAlbums, setShowAlbums] = React.useState(false);
   React.useEffect(() => {
     setActiveMediaIndex(0);
   }, [resolved.length]);
@@ -216,8 +221,26 @@ export const PostCard = ({
         <Text style={styles.likeText}>Likes: {likes || 0}</Text>
         <View style={styles.actionsRight}>
           <Button title="Like" onPress={onLike} disabled={!interactive || !onLike} />
+          {associatedAlbums.length ? (
+            <TouchableOpacity style={styles.albumsButton} onPress={() => setShowAlbums((prev) => !prev)}>
+              <Text style={styles.albumsButtonText}>Albums ({associatedAlbums.length})</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
+      {showAlbums && associatedAlbums.length ? (
+        <View style={styles.albumsRow}>
+          {associatedAlbums.map((album) => (
+            <TouchableOpacity
+              key={album.id}
+              style={styles.albumChip}
+              onPress={() => onOpenAssociatedAlbum?.(album.id, album.name)}
+            >
+              <Text style={styles.albumChipText}>{album.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
       {comments.map((c, idx) => (
         <Swipeable
           key={c.id ?? idx}
@@ -290,6 +313,11 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   actionsRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   likeText: { fontWeight: '600' },
+  albumsButton: { borderWidth: 1, borderColor: '#ddd', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  albumsButtonText: { fontSize: 12, color: '#333', fontWeight: '600' },
+  albumsRow: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  albumChip: { borderWidth: 1, borderColor: '#ddd', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#fff' },
+  albumChipText: { fontSize: 12, color: '#333' },
   menuWrapper: { position: 'relative' },
   ellipsisButton: { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6 },
   ellipsisText: { fontSize: 20, lineHeight: 20, color: '#444' },

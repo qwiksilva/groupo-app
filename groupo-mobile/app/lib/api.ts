@@ -72,6 +72,11 @@ export const fetchGroupMembers = async (groupId: number) => {
   return data.members;
 };
 
+export const fetchGroupAlbums = async (groupId: number) => {
+  const { data } = await api.get(`/api/groups/${groupId}/albums`);
+  return data.albums;
+};
+
 export const fetchAlbumMembers = async (albumId: number) => {
   const { data } = await api.get(`/api/albums/${albumId}/members`);
   return data.members;
@@ -92,8 +97,10 @@ export const createPost = async (groupId: number, content: string) => {
   return data;
 };
 
-export const createAlbumPost = async (albumId: number, content: string) => {
-  const { data } = await api.post(`/api/albums/${albumId}/posts`, { content });
+export const createAlbumPost = async (albumId: number, content: string, albumIds?: number[]) => {
+  const payload: Record<string, unknown> = { content };
+  if (albumIds?.length) payload.album_ids = albumIds;
+  const { data } = await api.post(`/api/albums/${albumId}/posts`, payload);
   return data;
 };
 
@@ -101,7 +108,8 @@ export const createPostWithFiles = async (
   groupId: number,
   content: string,
   files: { uri: string; name?: string; mimeType?: string }[],
-  targetType: 'group' | 'album' = 'group'
+  targetType: 'group' | 'album' = 'group',
+  albumIds: number[] = []
 ) => {
   let usedLowQuality = false;
   const headers: Record<string, string> = {
@@ -256,13 +264,16 @@ export const createPostWithFiles = async (
       : `/api/groups/${groupId}/posts/base64`;
 
   const uploadBase64Create = async (payloadFiles: { name: string; mimeType: string; data: string }[]) =>
-    await postJson(base64CreatePath, { content, files: payloadFiles });
+    await postJson(base64CreatePath, { content, files: payloadFiles, ...(albumIds.length ? { album_ids: albumIds } : {}) });
 
   const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) =>
     await postJson(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
 
   const uploadMultipartCreate = async (file: { uri: string; mimeType?: string }) =>
-    await uploadSingle(createPath, file, { content });
+    await uploadSingle(createPath, file, {
+      content,
+      ...(albumIds.length ? { album_ids: albumIds.join(',') } : {}),
+    });
 
   const uploadMultipartMedia = async (postId: number, file: { uri: string; mimeType?: string }) =>
     await uploadSingle(`/api/posts/${postId}/media`, file);
@@ -311,8 +322,15 @@ export const createGroup = async (name: string) => {
   return data;
 };
 
-export const createAlbum = async (name: string) => {
-  const { data } = await api.post('/api/albums', { name });
+export const createAlbum = async (name: string, groupId?: number) => {
+  const payload: Record<string, unknown> = { name };
+  if (groupId) payload.group_id = groupId;
+  const { data } = await api.post('/api/albums', payload);
+  return data;
+};
+
+export const createGroupAlbum = async (groupId: number, name: string) => {
+  const { data } = await api.post(`/api/groups/${groupId}/albums`, { name });
   return data;
 };
 

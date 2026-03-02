@@ -225,6 +225,10 @@ const AlbumDetail = () => {
             currentUserId={userId ?? undefined}
             postUserId={item.user_id}
             forceDeleteUI={FORCE_DELETE_UI}
+            associatedAlbums={item.associated_albums || []}
+            onOpenAssociatedAlbum={(targetAlbumId, targetAlbumName) =>
+              router.push({ pathname: '/album/[id]', params: { id: String(targetAlbumId), name: targetAlbumName } })
+            }
           />
         )}
       />

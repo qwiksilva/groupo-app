@@ -36,13 +36,14 @@ Add Albums
 - Create new first-class type for albums in addition to groups
 - Create new first-class type for albums in addition to groups - Done
 - Albums can be created inside groups
-- When an album is created in a group, all members get added to that album
-- Posts now go into an album instead of groups
-- The group page should have tabs for displaying members, albums, and all posts associated with those albums/group orders by post date-time
+- Albums can be created inside groups - Done
+- When an album is created in a group, all members get added to that album - Done
+- Posts now go into an album instead of groups - Done
+- The group page should have tabs for displaying members, albums, and all posts associated with those albums/group orders by post date-time - Done
 - Create a page for individual album, which displays all posts in that album in the format that the home page has - Done
-- When a user clicks on an album from the group page, it should take them to the album page
-- allow the user to select multiple albums the same post can be posted in
-- Create a button on each post that lets the user see all assocated albums and select one to go to that albums page
+- When a user clicks on an album from the group page, it should take them to the album page - Done
+- allow the user to select multiple albums the same post can be posted in - Done
+- Create a button on each post that lets the user see all assocated albums and select one to go to that albums page - Done
 - Only creator of album can change album name - Done
 
 Potential future updates

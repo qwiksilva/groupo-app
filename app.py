@@ -53,6 +53,9 @@ def _ensure_schema_columns():
     if "owner_id" not in group_cols:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN owner_id INTEGER"))
+    if "parent_group_id" not in group_cols:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE \"group\" ADD COLUMN parent_group_id INTEGER"))
 
 if os.environ.get('RENDER') == 'true':
     with app.app_context():
@@ -80,6 +83,7 @@ class Group(db.Model):
     name = db.Column(db.String(100), nullable=False)
     kind = db.Column(db.String(20), default='group', nullable=False)
     owner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    parent_group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
     owner = db.relationship('User', foreign_keys=[owner_id])
     members = db.relationship('User', secondary='group_members', backref='groups')
 
@@ -112,6 +116,11 @@ class GroupNameAlias(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'), primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+
+class PostAlbum(db.Model):
+    __tablename__ = 'post_album'
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), primary_key=True)
+    album_id = db.Column(db.Integer, db.ForeignKey('group.id'), primary_key=True)
 
 friends = db.Table('friends',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id')),
@@ -245,6 +254,77 @@ def _group_name_for_user(group: Group, user: User):
         return group.name
     alias = GroupNameAlias.query.filter_by(group_id=group.id, user_id=user.id).first()
     return alias.name if alias and alias.name else group.name
+
+
+def _parse_album_ids(raw):
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        values = []
+        for item in raw:
+            if isinstance(item, str) and ',' in item:
+                values.extend([v.strip() for v in item.split(',') if v.strip()])
+            else:
+                values.append(item)
+    elif isinstance(raw, str):
+        values = [v.strip() for v in raw.split(',') if v.strip()]
+    else:
+        values = [raw]
+    ids = []
+    for value in values:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    # Keep order, remove duplicates.
+    return list(dict.fromkeys(ids))
+
+
+def _albums_for_post(post: Post):
+    links = PostAlbum.query.filter_by(post_id=post.id).all()
+    album_ids = [l.album_id for l in links]
+    albums = []
+    if album_ids:
+        albums = Group.query.filter(Group.id.in_(album_ids), Group.kind == 'album').all()
+    by_id = {a.id: a for a in albums}
+    ordered = [by_id[i] for i in album_ids if i in by_id]
+    primary_group = Group.query.get(post.group_id)
+    if primary_group and primary_group.kind == 'album' and all(a.id != primary_group.id for a in ordered):
+        ordered.insert(0, primary_group)
+    return ordered
+
+
+def _serialize_post(post: Post, viewer: User, fallback_group_name: str | None = None):
+    primary_group = Group.query.get(post.group_id)
+    if primary_group and primary_group.kind == 'album':
+        display_name = primary_group.name
+    elif primary_group:
+        display_name = _group_name_for_user(primary_group, viewer)
+    else:
+        display_name = fallback_group_name or ''
+    associated_albums = _albums_for_post(post)
+    return {
+        "id": post.id,
+        "content": post.content,
+        "image_urls": _resolve_image_urls(post.image_urls),
+        "user": post.user.username,
+        "user_id": post.user_id,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "likes": post.likes,
+        "group_id": post.group_id,
+        "group_name": display_name,
+        "associated_albums": [
+            {"id": album.id, "name": album.name, "parent_group_id": album.parent_group_id}
+            for album in associated_albums
+        ],
+        "comments": [{
+            "id": c.id,
+            "content": c.content,
+            "user": c.user.username,
+            "user_id": c.user_id,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        } for c in post.comments]
+    }
 
 class DeviceToken(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -514,6 +594,67 @@ def notify_post_owner_like(actor: User, post: Post):
             print(f"[notify] error token={t.token} exc={exc}")
 
 
+def notify_album_members_post(albums, actor: User, post: Post):
+    member_ids = set()
+    for album in albums:
+        for member in album.members:
+            if member.id != actor.id:
+                member_ids.add(member.id)
+    if not member_ids:
+        return
+    tokens = DeviceToken.query.filter(DeviceToken.user_id.in_(list(member_ids))).all()
+    if not tokens:
+        return
+    album_names = ", ".join(album.name for album in albums[:2])
+    if len(albums) > 2:
+        album_names += "..."
+    expo_endpoint = os.environ.get("EXPO_PUSH_URL", "https://exp.host/--/api/v2/push/send")
+    for t in tokens:
+        payload = {
+            "to": t.token,
+            "title": "New post",
+            "body": f"{actor.username} posted in {album_names}",
+            "data": {"post_id": post.id, "type": "post"},
+        }
+        try:
+            resp = requests.post(expo_endpoint, json=payload, timeout=5)
+            if resp.status_code != 200:
+                print(f"[notify] failed status={resp.status_code} token={t.token} body={resp.text}")
+        except Exception as exc:
+            print(f"[notify] error token={t.token} exc={exc}")
+
+
+def _resolve_target_albums(primary_album: Group, actor: User, album_ids):
+    if primary_album.kind != 'album':
+        return {"error": "Not an album"}
+    target_ids = [primary_album.id]
+    for album_id in album_ids:
+        if album_id != primary_album.id:
+            target_ids.append(album_id)
+    target_ids = list(dict.fromkeys(target_ids))
+    albums = Group.query.filter(Group.id.in_(target_ids), Group.kind == 'album').all()
+    found = {a.id for a in albums}
+    missing = [aid for aid in target_ids if aid not in found]
+    if missing:
+        return {"error": "Some selected albums were not found"}
+    by_id = {a.id: a for a in albums}
+    ordered = [by_id[aid] for aid in target_ids]
+    root = primary_album.parent_group_id
+    for album in ordered:
+        if actor not in album.members:
+            return {"error": "Forbidden"}
+        if album.parent_group_id != root:
+            return {"error": "Selected albums must belong to the same group"}
+    return {"albums": ordered}
+
+
+def _attach_post_to_albums(post: Post, albums):
+    for album in albums:
+        exists = PostAlbum.query.filter_by(post_id=post.id, album_id=album.id).first()
+        if not exists:
+            db.session.add(PostAlbum(post_id=post.id, album_id=album.id))
+
+
 @app.route('/api/register', methods=['POST'])
 def api_register():
     data = request.get_json() or {}
@@ -561,6 +702,9 @@ def api_me():
 
     if request.method == 'DELETE':
         user = g.api_user
+        user_post_ids = [p.id for p in Post.query.filter_by(user_id=user.id).all()]
+        if user_post_ids:
+            PostAlbum.query.filter(PostAlbum.post_id.in_(user_post_ids)).delete(synchronize_session=False)
         Comment.query.filter_by(user_id=user.id).delete()
         Post.query.filter_by(user_id=user.id).delete()
         GroupMembers.query.filter_by(user_id=user.id).delete()
@@ -663,41 +807,20 @@ def api_group_posts(group_id):
         return jsonify({"error": "Forbidden"}), 403
 
     if request.method == 'POST':
-        content = request.form.get('content') or (request.get_json() or {}).get('content')
-        if not content:
-            return jsonify({"error": "Content required"}), 400
-        files = request.files.getlist('file')
-        if len(files) > MAX_MEDIA_PER_POST:
-            return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
-        image_urls = store_files(files)
-        post = Post(content=content, user_id=g.api_user.id, group_id=group.id, image_urls=','.join(image_urls))
-        db.session.add(post)
-        db.session.commit()
-        notify_group_members(group, g.api_user, post)
-        return jsonify({"message": "Created", "post_id": post.id})
+        return jsonify({"error": "Posts must be created in albums. Select one or more albums first."}), 400
 
-    posts = Post.query.filter_by(group_id=group.id).order_by(Post.id.desc()).all()
+    group_albums = Group.query.filter_by(kind='album', parent_group_id=group.id).all()
+    album_ids = [a.id for a in group_albums]
+    if album_ids:
+        related_post_ids = db.session.query(PostAlbum.post_id).filter(PostAlbum.album_id.in_(album_ids))
+        posts = Post.query.filter(or_(Post.id.in_(related_post_ids), Post.group_id == group.id)).order_by(Post.id.desc()).all()
+    else:
+        posts = Post.query.filter_by(group_id=group.id).order_by(Post.id.desc()).all()
     viewer_group_name = _group_name_for_user(group, g.api_user)
     return jsonify({
         "group": {"id": group.id, "name": viewer_group_name},
-        "posts": [{
-            "id": p.id,
-            "content": p.content,
-            "image_urls": _resolve_image_urls(p.image_urls),
-            "user": p.user.username,
-            "user_id": p.user_id,
-            "created_at": p.created_at.isoformat() if p.created_at else None,
-            "likes": p.likes,
-            "group_id": group.id,
-            "group_name": viewer_group_name,
-            "comments": [{
-                "id": c.id,
-                "content": c.content,
-                "user": c.user.username,
-                "user_id": c.user_id,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-            } for c in p.comments]
-        } for p in posts]
+        "albums": [{"id": a.id, "name": a.name, "owner_id": a.owner_id} for a in group_albums],
+        "posts": [_serialize_post(p, g.api_user, fallback_group_name=viewer_group_name) for p in posts]
     })
 
 
@@ -709,23 +832,7 @@ def api_group_posts_base64(group_id):
         return jsonify({"error": "Use album endpoints for albums"}), 400
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
-    data = request.get_json() or {}
-    content = data.get('content')
-    files = data.get('files') or []
-    if not content:
-        return jsonify({"error": "Content required"}), 400
-    if not files:
-        return jsonify({"error": "Files required"}), 400
-    if len(files) > MAX_MEDIA_PER_POST:
-        return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
-    image_urls = store_base64_files(files)
-    if not image_urls:
-        return jsonify({"error": "No valid files"}), 400
-    post = Post(content=content, user_id=g.api_user.id, group_id=group.id, image_urls=','.join(image_urls))
-    db.session.add(post)
-    db.session.commit()
-    notify_group_members(group, g.api_user, post)
-    return jsonify({"message": "Created", "post_id": post.id})
+    return jsonify({"error": "Posts must be created in albums. Select one or more albums first."}), 400
 
 
 @app.route('/api/groups/<int:group_id>/update', methods=['POST'])
@@ -782,8 +889,36 @@ def api_add_group_member_api(group_id):
         return jsonify({"error": "User not found"}), 404
     if user not in group.members:
         group.members.append(user)
+        child_albums = Group.query.filter_by(kind='album', parent_group_id=group.id).all()
+        for album in child_albums:
+            if user not in album.members:
+                album.members.append(user)
         db.session.commit()
     return jsonify({"message": "User added", "user": {"id": user.id, "username": user.username, "phone_number": user.phone_number}})
+
+
+@app.route('/api/groups/<int:group_id>/albums', methods=['GET', 'POST'])
+@token_required
+def api_group_albums(group_id):
+    group = Group.query.get_or_404(group_id)
+    if group.kind == 'album':
+        return jsonify({"error": "Not a group"}), 400
+    if g.api_user not in group.members:
+        return jsonify({"error": "Forbidden"}), 403
+    if request.method == 'GET':
+        albums = Group.query.filter_by(kind='album', parent_group_id=group.id).all()
+        return jsonify({"albums": [{"id": a.id, "name": a.name, "owner_id": a.owner_id} for a in albums]})
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    album = Group(name=name, kind='album', owner_id=g.api_user.id, parent_group_id=group.id)
+    for member in group.members:
+        if member not in album.members:
+            album.members.append(member)
+    db.session.add(album)
+    db.session.commit()
+    return jsonify({"id": album.id, "name": album.name, "owner_id": album.owner_id, "parent_group_id": album.parent_group_id})
 
 
 @app.route('/api/albums', methods=['GET', 'POST'])
@@ -792,15 +927,28 @@ def api_albums():
     if request.method == 'POST':
         data = request.get_json() or {}
         name = (data.get('name') or '').strip()
+        group_id = data.get('group_id')
         if not name:
             return jsonify({"error": "Name required"}), 400
-        album = Group(name=name, kind='album', owner_id=g.api_user.id)
-        album.members.append(g.api_user)
+        parent_group = None
+        if group_id is not None:
+            parent_group = Group.query.get(group_id)
+            if not parent_group or parent_group.kind == 'album':
+                return jsonify({"error": "Parent group not found"}), 404
+            if g.api_user not in parent_group.members:
+                return jsonify({"error": "Forbidden"}), 403
+        album = Group(name=name, kind='album', owner_id=g.api_user.id, parent_group_id=parent_group.id if parent_group else None)
+        if parent_group:
+            for member in parent_group.members:
+                if member not in album.members:
+                    album.members.append(member)
+        else:
+            album.members.append(g.api_user)
         db.session.add(album)
         db.session.commit()
-        return jsonify({"id": album.id, "name": album.name, "owner_id": album.owner_id})
+        return jsonify({"id": album.id, "name": album.name, "owner_id": album.owner_id, "parent_group_id": album.parent_group_id})
 
-    albums = [{"id": grp.id, "name": grp.name, "owner_id": grp.owner_id} for grp in g.api_user.groups if grp.kind == 'album']
+    albums = [{"id": grp.id, "name": grp.name, "owner_id": grp.owner_id, "parent_group_id": grp.parent_group_id} for grp in g.api_user.groups if grp.kind == 'album']
     return jsonify({"albums": albums})
 
 
@@ -818,36 +966,29 @@ def api_album_posts(album_id):
         if not content:
             return jsonify({"error": "Content required"}), 400
         files = request.files.getlist('file')
+        album_ids = _parse_album_ids(request.form.getlist('album_ids') or (request.get_json() or {}).get('album_ids'))
+        target = _resolve_target_albums(album, g.api_user, album_ids)
+        if target.get("error"):
+            message = target["error"]
+            code = 403 if message == "Forbidden" else 400
+            return jsonify({"error": message}), code
+        target_albums = target["albums"]
         if len(files) > MAX_MEDIA_PER_POST:
             return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
         image_urls = store_files(files)
         post = Post(content=content, user_id=g.api_user.id, group_id=album.id, image_urls=','.join(image_urls))
         db.session.add(post)
+        db.session.flush()
+        _attach_post_to_albums(post, target_albums)
         db.session.commit()
-        notify_group_members(album, g.api_user, post)
+        notify_album_members_post(target_albums, g.api_user, post)
         return jsonify({"message": "Created", "post_id": post.id})
 
-    posts = Post.query.filter_by(group_id=album.id).order_by(Post.id.desc()).all()
+    linked_post_ids = db.session.query(PostAlbum.post_id).filter_by(album_id=album.id)
+    posts = Post.query.filter(or_(Post.id.in_(linked_post_ids), Post.group_id == album.id)).order_by(Post.id.desc()).all()
     return jsonify({
-        "album": {"id": album.id, "name": album.name, "owner_id": album.owner_id},
-        "posts": [{
-            "id": p.id,
-            "content": p.content,
-            "image_urls": _resolve_image_urls(p.image_urls),
-            "user": p.user.username,
-            "user_id": p.user_id,
-            "created_at": p.created_at.isoformat() if p.created_at else None,
-            "likes": p.likes,
-            "group_id": album.id,
-            "group_name": album.name,
-            "comments": [{
-                "id": c.id,
-                "content": c.content,
-                "user": c.user.username,
-                "user_id": c.user_id,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-            } for c in p.comments]
-        } for p in posts]
+        "album": {"id": album.id, "name": album.name, "owner_id": album.owner_id, "parent_group_id": album.parent_group_id},
+        "posts": [_serialize_post(p, g.api_user, fallback_group_name=album.name) for p in posts]
     })
 
 
@@ -862,6 +1003,13 @@ def api_album_posts_base64(album_id):
     data = request.get_json() or {}
     content = data.get('content')
     files = data.get('files') or []
+    album_ids = _parse_album_ids(data.get('album_ids'))
+    target = _resolve_target_albums(album, g.api_user, album_ids)
+    if target.get("error"):
+        message = target["error"]
+        code = 403 if message == "Forbidden" else 400
+        return jsonify({"error": message}), code
+    target_albums = target["albums"]
     if not content:
         return jsonify({"error": "Content required"}), 400
     if not files:
@@ -873,8 +1021,10 @@ def api_album_posts_base64(album_id):
         return jsonify({"error": "No valid files"}), 400
     post = Post(content=content, user_id=g.api_user.id, group_id=album.id, image_urls=','.join(image_urls))
     db.session.add(post)
+    db.session.flush()
+    _attach_post_to_albums(post, target_albums)
     db.session.commit()
-    notify_group_members(album, g.api_user, post)
+    notify_album_members_post(target_albums, g.api_user, post)
     return jsonify({"message": "Created", "post_id": post.id})
 
 
@@ -951,9 +1101,18 @@ def api_comment_post(post_id):
     comment = Comment(content=content, user_id=g.api_user.id, post=post)
     db.session.add(comment)
     db.session.commit()
-    group = Group.query.get(post.group_id)
-    if group:
-        notify_group_members_comment(group, g.api_user, post, comment)
+    post_albums = _albums_for_post(post)
+    if post_albums:
+        seen_group_ids = set()
+        for album in post_albums:
+            if album.id in seen_group_ids:
+                continue
+            notify_group_members_comment(album, g.api_user, post, comment)
+            seen_group_ids.add(album.id)
+    else:
+        group = Group.query.get(post.group_id)
+        if group:
+            notify_group_members_comment(group, g.api_user, post, comment)
     return jsonify({"message": "Comment added.", "comment": {"id": comment.id, "content": comment.content, "user": g.api_user.username, "user_id": g.api_user.id, "created_at": comment.created_at.isoformat() if comment.created_at else None}})
 
 
@@ -963,6 +1122,7 @@ def api_delete_post(post_id):
     post = Post.query.get_or_404(post_id)
     if post.user_id != g.api_user.id:
         return jsonify({"error": "Forbidden"}), 403
+    PostAlbum.query.filter_by(post_id=post.id).delete()
     db.session.delete(post)
     db.session.commit()
     return jsonify({"message": "Post deleted"})
