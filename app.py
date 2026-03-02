@@ -466,9 +466,9 @@ def notify_group_members(group: Group, actor: User, post: Post):
 
 
 def notify_group_members_comment(group: Group, actor: User, post: Post, comment: Comment):
+    # Notify all group/album members except the actor.
+    # This includes the post owner (if different from actor).
     skip_ids = {actor.id}
-    if post.user_id:
-        skip_ids.add(post.user_id)
     member_ids = [m.id for m in group.members if m.id not in skip_ids]
     tokens = DeviceToken.query.filter(DeviceToken.user_id.in_(member_ids)).all()
     if not tokens:

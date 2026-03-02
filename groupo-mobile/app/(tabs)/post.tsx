@@ -129,11 +129,15 @@ const PostScreen = () => {
   useEffect(() => {
     if (!groups.length && !albums.length) return;
     if (presetGroupId) {
-      setSelectedTarget({ type: 'group', id: presetGroupId });
+      if (!selectedTarget || selectedTarget.type !== 'group' || selectedTarget.id !== presetGroupId) {
+        setSelectedTarget({ type: 'group', id: presetGroupId });
+      }
       return;
     }
     if (presetAlbumId) {
-      setSelectedTarget({ type: 'album', id: presetAlbumId });
+      if (!selectedTarget || selectedTarget.type !== 'album' || selectedTarget.id !== presetAlbumId) {
+        setSelectedTarget({ type: 'album', id: presetAlbumId });
+      }
       return;
     }
     if (!selectedTarget) {
