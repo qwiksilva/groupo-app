@@ -57,6 +57,28 @@ def _ensure_schema_columns():
     if "parent_group_id" not in group_cols:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN parent_group_id INTEGER"))
+    tables = set(inspector.get_table_names())
+    with db.engine.begin() as conn:
+        if "post_album" not in tables:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS post_album (
+                    post_id INTEGER NOT NULL,
+                    album_id INTEGER NOT NULL,
+                    PRIMARY KEY (post_id, album_id),
+                    FOREIGN KEY(post_id) REFERENCES post (id),
+                    FOREIGN KEY(album_id) REFERENCES "group" (id)
+                )
+            """))
+        if "post_like" not in tables:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS post_like (
+                    post_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    PRIMARY KEY (post_id, user_id),
+                    FOREIGN KEY(post_id) REFERENCES post (id),
+                    FOREIGN KEY(user_id) REFERENCES user (id)
+                )
+            """))
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
