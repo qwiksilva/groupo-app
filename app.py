@@ -58,13 +58,6 @@ def _ensure_schema_columns():
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE \"group\" ADD COLUMN parent_group_id INTEGER"))
 
-with app.app_context():
-    db.create_all()
-    try:
-        _ensure_schema_columns()
-    except Exception as exc:
-        print(f"[startup] failed to ensure schema columns: {exc}")
-
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
@@ -126,6 +119,13 @@ friends = db.Table('friends',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id')),
     db.Column('friend_id', db.Integer, db.ForeignKey('user.id'))
 )
+
+with app.app_context():
+    db.create_all()
+    try:
+        _ensure_schema_columns()
+    except Exception as exc:
+        print(f"[startup] failed to ensure schema columns: {exc}")
 
 
 def store_files(files):
