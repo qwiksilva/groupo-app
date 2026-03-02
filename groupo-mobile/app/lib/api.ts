@@ -62,8 +62,18 @@ export const fetchGroups = async () => {
   return data.groups;
 };
 
+export const fetchAlbums = async () => {
+  const { data } = await api.get('/api/albums');
+  return data.albums;
+};
+
 export const fetchGroupMembers = async (groupId: number) => {
   const { data } = await api.get(`/api/groups/${groupId}/members`);
+  return data.members;
+};
+
+export const fetchAlbumMembers = async (albumId: number) => {
+  const { data } = await api.get(`/api/albums/${albumId}/members`);
   return data.members;
 };
 
@@ -72,15 +82,26 @@ export const fetchGroupPosts = async (groupId: number) => {
   return data; // { group, posts }
 };
 
+export const fetchAlbumPosts = async (albumId: number) => {
+  const { data } = await api.get(`/api/albums/${albumId}/posts`);
+  return data; // { album, posts }
+};
+
 export const createPost = async (groupId: number, content: string) => {
   const { data } = await api.post(`/api/groups/${groupId}/posts`, { content });
+  return data;
+};
+
+export const createAlbumPost = async (albumId: number, content: string) => {
+  const { data } = await api.post(`/api/albums/${albumId}/posts`, { content });
   return data;
 };
 
 export const createPostWithFiles = async (
   groupId: number,
   content: string,
-  files: { uri: string; name?: string; mimeType?: string }[]
+  files: { uri: string; name?: string; mimeType?: string }[],
+  targetType: 'group' | 'album' = 'group'
 ) => {
   let usedLowQuality = false;
   const headers: Record<string, string> = {
@@ -225,14 +246,23 @@ export const createPostWithFiles = async (
     return data;
   };
 
+  const createPath =
+    targetType === 'album'
+      ? `/api/albums/${groupId}/posts`
+      : `/api/groups/${groupId}/posts`;
+  const base64CreatePath =
+    targetType === 'album'
+      ? `/api/albums/${groupId}/posts/base64`
+      : `/api/groups/${groupId}/posts/base64`;
+
   const uploadBase64Create = async (payloadFiles: { name: string; mimeType: string; data: string }[]) =>
-    await postJson(`/api/groups/${groupId}/posts/base64`, { content, files: payloadFiles });
+    await postJson(base64CreatePath, { content, files: payloadFiles });
 
   const uploadBase64Media = async (postId: number, payloadFiles: { name: string; mimeType: string; data: string }[]) =>
     await postJson(`/api/posts/${postId}/media/base64`, { files: payloadFiles });
 
   const uploadMultipartCreate = async (file: { uri: string; mimeType?: string }) =>
-    await uploadSingle(`/api/groups/${groupId}/posts`, file, { content });
+    await uploadSingle(createPath, file, { content });
 
   const uploadMultipartMedia = async (postId: number, file: { uri: string; mimeType?: string }) =>
     await uploadSingle(`/api/posts/${postId}/media`, file);
@@ -278,6 +308,11 @@ export const createPostWithFiles = async (
 
 export const createGroup = async (name: string) => {
   const { data } = await api.post('/api/groups', { name });
+  return data;
+};
+
+export const createAlbum = async (name: string) => {
+  const { data } = await api.post('/api/albums', { name });
   return data;
 };
 
@@ -340,6 +375,11 @@ export const updateGroup = async (groupId: number, name: string) => {
   return data.group;
 };
 
+export const updateAlbum = async (albumId: number, name: string) => {
+  const { data } = await api.post(`/api/albums/${albumId}/update`, { name });
+  return data.album;
+};
+
 export const addGroupMember = async (groupId: number, username: string) => {
   const trimmed = username.trim();
   const digits = trimmed.replace(/\D/g, '');
@@ -348,5 +388,16 @@ export const addGroupMember = async (groupId: number, username: string) => {
       ? { phone_number: digits }
       : { username: trimmed };
   const { data } = await api.post(`/api/groups/${groupId}/members`, payload);
+  return data.user;
+};
+
+export const addAlbumMember = async (albumId: number, username: string) => {
+  const trimmed = username.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  const payload =
+    digits.length >= 10
+      ? { phone_number: digits }
+      : { username: trimmed };
+  const { data } = await api.post(`/api/albums/${albumId}/members`, payload);
   return data.user;
 };

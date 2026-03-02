@@ -31,15 +31,24 @@ Add member text box in group setting page gets cut off by keyboard, can't see wh
 Ensure all text boxes in app use best-practice UI/UX design - Done
 Add notifications on likes and comments - Done
 
-Major updates
-Create new first-class type for albums in addition to groups. 
-Only owner can change album name
+Major updates:
+Add Albums
+- Create new first-class type for albums in addition to groups
+- Create new first-class type for albums in addition to groups - Done
+- Albums can be created inside groups
+- When an album is created in a group, all members get added to that album
+- Posts now go into an album instead of groups
+- The group page should have tabs for displaying members, albums, and all posts associated with those albums/group orders by post date-time
+- Create a page for individual album, which displays all posts in that album in the format that the home page has - Done
+- When a user clicks on an album from the group page, it should take them to the album page
+- allow the user to select multiple albums the same post can be posted in
+- Create a button on each post that lets the user see all assocated albums and select one to go to that albums page
+- Only creator of album can change album name - Done
 
 Potential future updates
 add ability to save draft as post and add page to view/resume drafts
 integrate with contacts
 Ability to add friends and page to view friends, and make groups/albums with them
-Remove user from group - Not needed for now
+Remove user from group
 Delete post
 limit likes to 1 per post
-

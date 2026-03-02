@@ -22,6 +22,7 @@ const MAPPING = {
   'plus.circle.fill': 'add-circle',
   'gearshape': 'settings',
   'person.circle': 'person',
+  'photo.on.rectangle.angled': 'photo-library',
 } as IconMapping;
 
 /**

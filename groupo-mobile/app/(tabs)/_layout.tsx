@@ -13,7 +13,9 @@ export default function TabLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const groupMatch = pathname.match(/\/group\/([^/]+)/);
+  const albumMatch = pathname.match(/\/album\/([^/]+)/);
   const activeGroupId = groupMatch?.[1];
+  const activeAlbumId = albumMatch?.[1];
 
   const handlePostPress = () => {
     if (process.env.EXPO_OS === 'ios') {
@@ -21,6 +23,10 @@ export default function TabLayout() {
     }
     if (activeGroupId) {
       router.push(`/post?groupId=${encodeURIComponent(activeGroupId)}`);
+      return;
+    }
+    if (activeAlbumId) {
+      router.push(`/post?albumId=${encodeURIComponent(activeAlbumId)}`);
       return;
     }
     router.push('/post');
@@ -66,11 +72,33 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="albums"
+        options={{
+          title: 'Albums',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="photo.on.rectangle.angled" color={color} />,
+          headerShown: true,
+        }}
+      />
+      <Tabs.Screen
         name="groups"
         options={{
           title: 'Groups',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.3.fill" color={color} />,
           headerShown: true,
+        }}
+      />
+      <Tabs.Screen
+        name="album/[id]"
+        options={{
+          href: null,
+          headerShown: true,
+        }}
+      />
+      <Tabs.Screen
+        name="album/[id]/settings"
+        options={{
+          href: null,
+          headerShown: false,
         }}
       />
       <Tabs.Screen

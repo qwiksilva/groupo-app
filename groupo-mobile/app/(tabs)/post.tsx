@@ -9,7 +9,9 @@ import { PostCard } from '@/components/post-card';
 import {
   api,
   fetchGroups,
+  fetchAlbums,
   createPost,
+  createAlbumPost,
   createPostWithFiles,
   setToken,
 } from '../lib/api';
@@ -62,13 +64,16 @@ const resolveAssetUri = async (asset: ImagePicker.ImagePickerAsset) => {
 };
 
 const PostScreen = () => {
-  const params = useLocalSearchParams<{ groupId?: string }>();
+  const params = useLocalSearchParams<{ groupId?: string; albumId?: string }>();
+  const albumParamId = params.albumId;
   const presetGroupId = params.groupId ? Number(params.groupId) : null;
+  const presetAlbumId = albumParamId ? Number(albumParamId) : null;
   const router = useRouter();
 
   const [token, setTokenState] = useState<string | null>(null);
   const [groups, setGroups] = useState<any[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [albums, setAlbums] = useState<any[]>([]);
+  const [selectedTarget, setSelectedTarget] = useState<{ type: 'group' | 'album'; id: number } | null>(null);
   const [content, setContent] = useState('');
   const [media, setMedia] = useState<any[]>([]);
   const [status, setStatus] = useState('');
@@ -105,6 +110,8 @@ const PostScreen = () => {
     try {
       const data = await fetchGroups();
       setGroups(data);
+      const albumData = await fetchAlbums();
+      setAlbums(albumData);
       setStatus('');
     } catch (err: any) {
       setStatus(err.response?.data?.error || err.message);
@@ -120,18 +127,30 @@ const PostScreen = () => {
   );
 
   useEffect(() => {
-    if (!groups.length) return;
+    if (!groups.length && !albums.length) return;
     if (presetGroupId) {
-      setSelectedGroupId(presetGroupId);
+      setSelectedTarget({ type: 'group', id: presetGroupId });
       return;
     }
-    if (!selectedGroupId) {
-      setSelectedGroupId(groups[0].id);
+    if (presetAlbumId) {
+      setSelectedTarget({ type: 'album', id: presetAlbumId });
+      return;
     }
-  }, [groups, presetGroupId, selectedGroupId]);
+    if (!selectedTarget) {
+      if (groups.length) {
+        setSelectedTarget({ type: 'group', id: groups[0].id });
+      } else if (albums.length) {
+        setSelectedTarget({ type: 'album', id: albums[0].id });
+      }
+    }
+  }, [groups, albums, presetGroupId, presetAlbumId, selectedTarget]);
 
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
-  const selectedLabel = selectedGroup?.name || (selectedGroupId ? `Group ${selectedGroupId}` : 'Select a group');
+  const options = [
+    ...groups.map((g) => ({ id: g.id, type: 'group' as const, name: g.name })),
+    ...albums.map((a) => ({ id: a.id, type: 'album' as const, name: a.name })),
+  ];
+  const selectedOption = options.find((o) => selectedTarget && o.id === selectedTarget.id && o.type === selectedTarget.type);
+  const selectedLabel = selectedOption ? `${selectedOption.type === 'album' ? 'Album' : 'Group'}: ${selectedOption.name}` : 'Select a destination';
 
   const previewUser = 'You';
   const clearDraft = () => {
@@ -209,8 +228,8 @@ const PostScreen = () => {
 
   const handlePost = async () => {
     if (isPosting) return;
-    if (!selectedGroupId) {
-      setStatus('Select a group to post in.');
+    if (!selectedTarget) {
+      setStatus('Select a destination to post in.');
       return;
     }
     if (!media.length) {
@@ -221,20 +240,28 @@ const PostScreen = () => {
       setIsPosting(true);
       setStatus('Uploading...');
       if (media.length) {
-        const res = await createPostWithFiles(selectedGroupId, content, media);
+        const res = await createPostWithFiles(selectedTarget.id, content, media, selectedTarget.type);
         if (res.uploadQuality === 'low') {
           setStatus('Uploaded in lower quality due to size.');
         } else {
           setStatus('Posted.');
         }
       } else {
-        await createPost(selectedGroupId, content);
+        if (selectedTarget.type === 'album') {
+          await createAlbumPost(selectedTarget.id, content);
+        } else {
+          await createPost(selectedTarget.id, content);
+        }
         setStatus('Posted.');
       }
       setContent('');
       setMedia([]);
       setShowPreview(false);
-      router.replace({ pathname: '/group/[id]', params: { id: String(selectedGroupId), name: selectedLabel } });
+      if (selectedTarget.type === 'album') {
+        router.replace({ pathname: '/album/[id]', params: { id: String(selectedTarget.id), name: selectedOption?.name || selectedLabel } });
+      } else {
+        router.replace({ pathname: '/group/[id]', params: { id: String(selectedTarget.id), name: selectedOption?.name || selectedLabel } });
+      }
     } catch (err: any) {
       if (err.response?.status === 401) {
         setStatus('Session expired. Please log in again.');
@@ -314,18 +341,18 @@ const PostScreen = () => {
       <Modal visible={showGroupPicker} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Select Group</Text>
+              <Text style={styles.modalTitle}>Select Destination</Text>
               <ScrollView>
-                {groups.map((g) => (
+                {options.map((g) => (
                   <TouchableOpacity
-                    key={g.id}
+                    key={`${g.type}-${g.id}`}
                     style={styles.groupOption}
                     onPress={() => {
-                      setSelectedGroupId(g.id);
+                      setSelectedTarget({ type: g.type, id: g.id });
                       setShowGroupPicker(false);
                     }}
                   >
-                    <Text style={styles.groupOptionText}>{g.name}</Text>
+                    <Text style={styles.groupOptionText}>{g.type === 'album' ? `Album: ${g.name}` : `Group: ${g.name}`}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>

@@ -45,6 +45,14 @@ def _ensure_schema_columns():
     if "phone_number" not in user_cols:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE user ADD COLUMN phone_number VARCHAR(20)"))
+    group_cols = [c["name"] for c in inspector.get_columns("group")]
+    if "kind" not in group_cols:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE \"group\" ADD COLUMN kind VARCHAR(20) DEFAULT 'group'"))
+            conn.execute(text("UPDATE \"group\" SET kind = 'group' WHERE kind IS NULL"))
+    if "owner_id" not in group_cols:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE \"group\" ADD COLUMN owner_id INTEGER"))
 
 if os.environ.get('RENDER') == 'true':
     with app.app_context():
@@ -70,6 +78,9 @@ class User(db.Model, UserMixin):
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    kind = db.Column(db.String(20), default='group', nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    owner = db.relationship('User', foreign_keys=[owner_id])
     members = db.relationship('User', secondary='group_members', backref='groups')
 
 class Post(db.Model):
@@ -230,6 +241,8 @@ def _public_user_payload(user: User):
 
 
 def _group_name_for_user(group: Group, user: User):
+    if group.kind == 'album':
+        return group.name
     alias = GroupNameAlias.query.filter_by(group_id=group.id, user_id=user.id).first()
     return alias.name if alias and alias.name else group.name
 
@@ -622,13 +635,13 @@ def api_groups():
         name = data.get('name')
         if not name:
             return jsonify({"error": "Name required"}), 400
-        group = Group(name=name)
+        group = Group(name=name, kind='group')
         group.members.append(g.api_user)
         db.session.add(group)
         db.session.commit()
         return jsonify({"id": group.id, "name": _group_name_for_user(group, g.api_user)})
 
-    groups = [{"id": grp.id, "name": _group_name_for_user(grp, g.api_user)} for grp in g.api_user.groups]
+    groups = [{"id": grp.id, "name": _group_name_for_user(grp, g.api_user)} for grp in g.api_user.groups if grp.kind != 'album']
     return jsonify({"groups": groups})
 
 
@@ -636,6 +649,8 @@ def api_groups():
 @token_required
 def api_group_posts(group_id):
     group = Group.query.get_or_404(group_id)
+    if group.kind == 'album':
+        return jsonify({"error": "Use album endpoints for albums"}), 400
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
 
@@ -682,6 +697,8 @@ def api_group_posts(group_id):
 @token_required
 def api_group_posts_base64(group_id):
     group = Group.query.get_or_404(group_id)
+    if group.kind == 'album':
+        return jsonify({"error": "Use album endpoints for albums"}), 400
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
     data = request.get_json() or {}
@@ -707,6 +724,8 @@ def api_group_posts_base64(group_id):
 @token_required
 def api_update_group(group_id):
     group = Group.query.get_or_404(group_id)
+    if group.kind == 'album':
+        return jsonify({"error": "Use album update endpoint"}), 400
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
     data = request.get_json() or {}
@@ -727,6 +746,8 @@ def api_update_group(group_id):
 @token_required
 def api_add_group_member_api(group_id):
     group = Group.query.get_or_404(group_id)
+    if group.kind == 'album':
+        return jsonify({"error": "Use album members endpoint"}), 400
     if g.api_user not in group.members:
         return jsonify({"error": "Forbidden"}), 403
     if request.method == 'GET':
@@ -755,6 +776,151 @@ def api_add_group_member_api(group_id):
         group.members.append(user)
         db.session.commit()
     return jsonify({"message": "User added", "user": {"id": user.id, "username": user.username, "phone_number": user.phone_number}})
+
+
+@app.route('/api/albums', methods=['GET', 'POST'])
+@token_required
+def api_albums():
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({"error": "Name required"}), 400
+        album = Group(name=name, kind='album', owner_id=g.api_user.id)
+        album.members.append(g.api_user)
+        db.session.add(album)
+        db.session.commit()
+        return jsonify({"id": album.id, "name": album.name, "owner_id": album.owner_id})
+
+    albums = [{"id": grp.id, "name": grp.name, "owner_id": grp.owner_id} for grp in g.api_user.groups if grp.kind == 'album']
+    return jsonify({"albums": albums})
+
+
+@app.route('/api/albums/<int:album_id>/posts', methods=['GET', 'POST'])
+@token_required
+def api_album_posts(album_id):
+    album = Group.query.get_or_404(album_id)
+    if album.kind != 'album':
+        return jsonify({"error": "Not an album"}), 400
+    if g.api_user not in album.members:
+        return jsonify({"error": "Forbidden"}), 403
+
+    if request.method == 'POST':
+        content = request.form.get('content') or (request.get_json() or {}).get('content')
+        if not content:
+            return jsonify({"error": "Content required"}), 400
+        files = request.files.getlist('file')
+        if len(files) > MAX_MEDIA_PER_POST:
+            return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
+        image_urls = store_files(files)
+        post = Post(content=content, user_id=g.api_user.id, group_id=album.id, image_urls=','.join(image_urls))
+        db.session.add(post)
+        db.session.commit()
+        notify_group_members(album, g.api_user, post)
+        return jsonify({"message": "Created", "post_id": post.id})
+
+    posts = Post.query.filter_by(group_id=album.id).order_by(Post.id.desc()).all()
+    return jsonify({
+        "album": {"id": album.id, "name": album.name, "owner_id": album.owner_id},
+        "posts": [{
+            "id": p.id,
+            "content": p.content,
+            "image_urls": _resolve_image_urls(p.image_urls),
+            "user": p.user.username,
+            "user_id": p.user_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "likes": p.likes,
+            "group_id": album.id,
+            "group_name": album.name,
+            "comments": [{
+                "id": c.id,
+                "content": c.content,
+                "user": c.user.username,
+                "user_id": c.user_id,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            } for c in p.comments]
+        } for p in posts]
+    })
+
+
+@app.route('/api/albums/<int:album_id>/posts/base64', methods=['POST'])
+@token_required
+def api_album_posts_base64(album_id):
+    album = Group.query.get_or_404(album_id)
+    if album.kind != 'album':
+        return jsonify({"error": "Not an album"}), 400
+    if g.api_user not in album.members:
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json() or {}
+    content = data.get('content')
+    files = data.get('files') or []
+    if not content:
+        return jsonify({"error": "Content required"}), 400
+    if not files:
+        return jsonify({"error": "Files required"}), 400
+    if len(files) > MAX_MEDIA_PER_POST:
+        return jsonify({"error": f"Too many files (max {MAX_MEDIA_PER_POST})."}), 400
+    image_urls = store_base64_files(files)
+    if not image_urls:
+        return jsonify({"error": "No valid files"}), 400
+    post = Post(content=content, user_id=g.api_user.id, group_id=album.id, image_urls=','.join(image_urls))
+    db.session.add(post)
+    db.session.commit()
+    notify_group_members(album, g.api_user, post)
+    return jsonify({"message": "Created", "post_id": post.id})
+
+
+@app.route('/api/albums/<int:album_id>/members', methods=['GET', 'POST'])
+@token_required
+def api_album_members(album_id):
+    album = Group.query.get_or_404(album_id)
+    if album.kind != 'album':
+        return jsonify({"error": "Not an album"}), 400
+    if g.api_user not in album.members:
+        return jsonify({"error": "Forbidden"}), 403
+    if request.method == 'GET':
+        members = [{
+            "id": m.id,
+            "username": m.username,
+            "first_name": m.first_name,
+            "last_name": m.last_name,
+            "phone_number": m.phone_number,
+        } for m in album.members]
+        return jsonify({"members": members, "owner_id": album.owner_id})
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    phone_number = _normalize_phone_number(data.get('phone_number'))
+    if not username and not phone_number:
+        return jsonify({"error": "Username or phone number required"}), 400
+    filters = []
+    if username:
+        filters.append(User.username == username)
+    if phone_number:
+        filters.append(User.phone_number == phone_number)
+    user = User.query.filter(or_(*filters)).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user not in album.members:
+        album.members.append(user)
+        db.session.commit()
+    return jsonify({"message": "User added", "user": {"id": user.id, "username": user.username, "phone_number": user.phone_number}})
+
+
+@app.route('/api/albums/<int:album_id>/update', methods=['POST'])
+@token_required
+def api_update_album(album_id):
+    album = Group.query.get_or_404(album_id)
+    if album.kind != 'album':
+        return jsonify({"error": "Not an album"}), 400
+    if album.owner_id != g.api_user.id:
+        return jsonify({"error": "Only the album owner can rename this album"}), 403
+    data = request.get_json() or {}
+    new_name = (data.get('name') or '').strip()
+    if not new_name:
+        return jsonify({"error": "Name required"}), 400
+    album.name = new_name
+    db.session.commit()
+    return jsonify({"album": {"id": album.id, "name": album.name, "owner_id": album.owner_id}})
 
 
 @app.route('/api/posts/<int:post_id>/like', methods=['POST'])

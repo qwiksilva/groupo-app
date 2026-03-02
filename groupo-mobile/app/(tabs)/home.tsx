@@ -10,7 +10,9 @@ import {
   login,
   register,
   fetchGroups,
+  fetchAlbums,
   fetchGroupPosts,
+  fetchAlbumPosts,
   registerPushToken,
   resolveUrl,
   likePost,
@@ -107,7 +109,8 @@ const HomeScreen = () => {
   const loadFeed = async () => {
     try {
       const groups = await fetchGroups();
-      const postsArrays = await Promise.all(
+      const albums = await fetchAlbums();
+      const groupPostsArrays = await Promise.all(
         groups.map(async (g: any) => {
           try {
             const res = await fetchGroupPosts(g.id);
@@ -123,7 +126,23 @@ const HomeScreen = () => {
           }
         })
       );
-      const combined = postsArrays.flat().sort((a: any, b: any) => b.id - a.id);
+      const albumPostsArrays = await Promise.all(
+        albums.map(async (a: any) => {
+          try {
+            const res = await fetchAlbumPosts(a.id);
+            const albumName = res.album?.name ?? a.name;
+            const albumId = res.album?.id ?? a.id;
+            return (res.posts || []).map((p: any) => ({
+              ...p,
+              group_id: p.group_id || albumId,
+              group_name: p.group_name || albumName,
+            }));
+          } catch {
+            return [];
+          }
+        })
+      );
+      const combined = [...groupPostsArrays.flat(), ...albumPostsArrays.flat()].sort((a: any, b: any) => b.id - a.id);
       setFeed(combined);
       setStatus('');
     } catch (err: any) {
