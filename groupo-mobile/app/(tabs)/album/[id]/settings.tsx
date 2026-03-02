@@ -38,6 +38,10 @@ const AlbumSettings = () => {
     loadMembers();
   }, [loadMembers]);
 
+  useEffect(() => {
+    setName(params.name || '');
+  }, [params.name, params.id]);
+
   const saveName = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -119,7 +123,13 @@ const AlbumSettings = () => {
             </View>
 
             {status ? <Text style={styles.status}>{status}</Text> : null}
-            <Button title="Back to album" onPress={() => { Keyboard.dismiss(); router.back(); }} />
+            <Button
+              title="Back to album"
+              onPress={() => {
+                Keyboard.dismiss();
+                router.replace({ pathname: '/album/[id]', params: { id: String(albumId), name: name.trim() || params.name || `Album ${params.id}` } });
+              }}
+            />
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>

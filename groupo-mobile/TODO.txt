@@ -33,9 +33,7 @@ Add notifications on likes and comments - Done
 
 Major updates:
 Add Albums
-- Create new first-class type for albums in addition to groups
 - Create new first-class type for albums in addition to groups - Done
-- Albums can be created inside groups
 - Albums can be created inside groups - Done
 - When an album is created in a group, all members get added to that album - Done
 - Posts now go into an album instead of groups - Done
@@ -53,3 +51,4 @@ Ability to add friends and page to view friends, and make groups/albums with the
 Remove user from group
 Delete post
 limit likes to 1 per post
+limit likes to 1 per post - Done

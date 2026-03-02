@@ -115,6 +115,11 @@ class PostAlbum(db.Model):
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'), primary_key=True)
     album_id = db.Column(db.Integer, db.ForeignKey('group.id'), primary_key=True)
 
+class PostLike(db.Model):
+    __tablename__ = 'post_like'
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
+
 friends = db.Table('friends',
     db.Column('user_id', db.Integer, db.ForeignKey('user.id')),
     db.Column('friend_id', db.Integer, db.ForeignKey('user.id'))
@@ -705,6 +710,8 @@ def api_me():
         user_post_ids = [p.id for p in Post.query.filter_by(user_id=user.id).all()]
         if user_post_ids:
             PostAlbum.query.filter(PostAlbum.post_id.in_(user_post_ids)).delete(synchronize_session=False)
+            PostLike.query.filter(PostLike.post_id.in_(user_post_ids)).delete(synchronize_session=False)
+        PostLike.query.filter_by(user_id=user.id).delete()
         Comment.query.filter_by(user_id=user.id).delete()
         Post.query.filter_by(user_id=user.id).delete()
         GroupMembers.query.filter_by(user_id=user.id).delete()
@@ -1085,10 +1092,14 @@ def api_update_album(album_id):
 @token_required
 def api_like_post(post_id):
     post = Post.query.get_or_404(post_id)
+    existing_like = PostLike.query.filter_by(post_id=post.id, user_id=g.api_user.id).first()
+    if existing_like:
+        return jsonify({"likes": post.likes, "already_liked": True})
+    db.session.add(PostLike(post_id=post.id, user_id=g.api_user.id))
     post.likes += 1
     db.session.commit()
     notify_post_owner_like(g.api_user, post)
-    return jsonify({"likes": post.likes})
+    return jsonify({"likes": post.likes, "already_liked": False})
 
 
 @app.route('/api/posts/<int:post_id>/comment', methods=['POST'])
@@ -1123,6 +1134,7 @@ def api_delete_post(post_id):
     if post.user_id != g.api_user.id:
         return jsonify({"error": "Forbidden"}), 403
     PostAlbum.query.filter_by(post_id=post.id).delete()
+    PostLike.query.filter_by(post_id=post.id).delete()
     db.session.delete(post)
     db.session.commit()
     return jsonify({"message": "Post deleted"})

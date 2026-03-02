@@ -21,7 +21,7 @@ const AlbumDetail = () => {
   const FORCE_DELETE_UI = false;
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const albumId = Number(params.id);
-  const albumName = params.name || `Album ${params.id}`;
+  const [albumName, setAlbumName] = useState(params.name || `Album ${params.id}`);
 
   const [posts, setPosts] = useState<any[]>([]);
   const [status, setStatus] = useState('');
@@ -51,6 +51,8 @@ const AlbumDetail = () => {
     }
     try {
       const data = await fetchAlbumPosts(albumId);
+      const freshName = data?.album?.name || params.name || `Album ${params.id}`;
+      setAlbumName(freshName);
       setPosts(data.posts || []);
       setStatus('');
     } catch (err: any) {
@@ -60,7 +62,11 @@ const AlbumDetail = () => {
       }
       setStatus(err.response?.data?.error || err.message);
     }
-  }, [albumId, handleLogout]);
+  }, [albumId, handleLogout, params.name, params.id]);
+
+  useEffect(() => {
+    setAlbumName(params.name || `Album ${params.id}`);
+  }, [params.name, params.id]);
 
   useEffect(() => {
     load();

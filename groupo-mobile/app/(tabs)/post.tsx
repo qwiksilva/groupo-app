@@ -344,6 +344,14 @@ const PostScreen = () => {
             <Button
               title="Preview"
               onPress={() => {
+                if (!selectedTarget) {
+                  setStatus('Select a destination first.');
+                  return;
+                }
+                if (selectedTarget.type === 'group' && !selectedAlbumIds.length) {
+                  setStatus('Select at least one album before previewing.');
+                  return;
+                }
                 if (!media.length) {
                   setStatus('Select at least one photo or video before previewing.');
                   return;
